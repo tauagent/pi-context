@@ -1,0 +1,39 @@
+{
+  "name": "pi-tree-tools",
+  "version": "1.0.0",
+  "description": "Pi extension for autonomous tree-based context management and time-travel debugging",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "pi-agent",
+    "pi-extension",
+    "context-management",
+    "time-travel"
+  ],
+  "type": "module",
+  "author": "",
+  "license": "MIT",
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.13"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "@mariozechner/pi-coding-agent": "latest"
+  },
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  }
+}
