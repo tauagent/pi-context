@@ -1,165 +1,330 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import type {
+  ExtensionAPI,
+  SessionEntry,
+  SessionManager,
+  SessionMessageEntry,
+  BranchSummaryEntry,
+  CompactionEntry,
+} from "@mariozechner/pi-coding-agent";
+import type {
+  ToolResultMessage,
+  AssistantMessage,
+  ToolCall,
+  TextContent,
+  ImageContent,
+} from "@mariozechner/pi-ai";
+import { Type, type Static } from "@sinclair/typebox";
+
+// Define missing types locally as they are not exported from the main entry point
+interface SessionTreeNode {
+  entry: SessionEntry;
+  children: SessionTreeNode[];
+  label?: string;
+}
+
+const ContextLogParams = Type.Object({
+  limit: Type.Optional(Type.Number({ description: "History limit for visible entries (default: 50)." })),
+  verbose: Type.Optional(Type.Boolean({ description: "If true, show ALL messages. If false (default), collapses intermediate AI steps and only shows 'milestones': User messages, Tags, Branch Points, and Summaries." })),
+});
+
+const ContextCheckoutParams = Type.Object({
+  target: Type.String({ description: "The commit hash (message ID) or tag (label) to switch to. Use 'root' to jump to the very beginning." }),
+  message: Type.Optional(Type.String({ description: "The 'Context Carryover Message'. A summary of your *current* progress/lessons that you want to bring with you to the new state. This ensures you don't lose key information when switching contexts." })),
+  tagName: Type.Optional(Type.String({ description: "Optional tag name to apply to the target state immediately after checking out." })),
+});
+
+const ContextTagParams = Type.Object({
+  name: Type.String({ description: "The tag name (label). Works like 'git tag <name>'." }),
+  target: Type.Optional(Type.String({ description: "Optional commit hash (message ID) to tag. Default is HEAD." })),
+});
+
+const isInternal = (name: string) => ["context_log", "context_checkout", "context_tag", "context_list", "context_switch", "context_merge", "context_checkpoint"].includes(name);
+
+const resolveTargetId = (sm: SessionManager, target: string): string => {
+  if (target.toLowerCase() === "root") {
+    const tree = sm.getTree() as unknown as SessionTreeNode[];
+    return tree.length > 0 ? tree[0].entry.id : target;
+  }
+  if (/^[0-9a-f]{8,}$/i.test(target)) return target;
+  const find = (nodes: SessionTreeNode[]): string | null => {
+    for (const n of nodes) {
+      if (sm.getLabel(n.entry.id) === target) return n.entry.id;
+      const r = find(n.children);
+      if (r) return r;
+    }
+    return null;
+  };
+  // sm.getTree() returns the SDK's SessionTreeNode[], which is structurally compatible
+  return find(sm.getTree() as unknown as SessionTreeNode[]) || target;
+};
+
+const formatTokens = (n: number) => {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+  if (n >= 1_000) return Math.round(n / 1_000) + "k";
+  return n.toString();
+};
 
 export default function (pi: ExtensionAPI) {
-  // Command to handle the actual navigation (must run outside tool execution)
-  pi.registerCommand("_tree_nav", {
-    description: "Internal command for tree navigation",
-    handler: async (args, ctx) => {
-      try {
-        const params = JSON.parse(args);
-        const { targetId, summary, label } = params;
+  pi.registerTool({
+    name: "context_log",
+    label: "Context Log",
+    description: "Show the conversation history graph. Analogous to 'git log --graph --oneline --decorate'. Use this to see branches, tags, and commits (messages).",
+    parameters: ContextLogParams,
+    async execute(_id, params: Static<typeof ContextLogParams>, _signal, _onUpdate, ctx) {
+      const sm = ctx.sessionManager as SessionManager;
+      const tree = sm.getTree() as unknown as SessionTreeNode[];
+      const currentLeafId = sm.getLeafId();
+      const verbose = params.verbose ?? false;
+      const limit = params.limit ?? 50;
 
-        if (!targetId) {
-          ctx.ui.notify("Missing targetId for navigation", "error");
+      const parents = new Map<string, string>();
+      const entryMap = new Map<string, SessionEntry>();
+      const childrenMap = new Map<string, SessionEntry[]>();
+
+      const walk = (nodes: SessionTreeNode[], pId?: string) => {
+        for (const n of nodes) {
+          entryMap.set(n.entry.id, n.entry);
+          if (pId) {
+            parents.set(n.entry.id, pId);
+            const siblings = childrenMap.get(pId) || [];
+            siblings.push(n.entry);
+            childrenMap.set(pId, siblings);
+          }
+          walk(n.children, n.entry.id);
+        }
+      };
+      walk(tree);
+
+      const getMsgContent = (entry: SessionEntry): string => {
+        if (entry.type === "branch_summary" || entry.type === "compaction") {
+          const e = entry as BranchSummaryEntry | CompactionEntry;
+          return e.summary || "[No summary provided]";
+        }
+        if (entry.type === "label") {
+          return `tag: ${entry.label}`;
+        }
+
+        if (entry.type === "message") {
+          const msg = entry.message;
+
+          if (msg.role === "toolResult") {
+            const tr = msg as ToolResultMessage;
+            if (!verbose && isInternal(tr.toolName)) return "";
+
+            const extractText = (content: (TextContent | ImageContent)[]): string => {
+              return content
+                .map((p) => (p.type === "text" ? p.text : ""))
+                .join(" ")
+                .trim();
+            };
+
+            let resText = extractText(tr.content);
+            const details = tr.details as Record<string, unknown> | undefined;
+            if ((tr.toolName === "read" || tr.toolName === "edit") && details && "path" in details && typeof details.path === "string") {
+              resText = `${details.path}: ${resText}`;
+            }
+            return `(${tr.toolName}) ${resText}`;
+          }
+
+          if (msg.role === "bashExecution") {
+            return `[Bash] ${msg.command}`;
+          }
+
+          if (msg.role === "user" || msg.role === "assistant") {
+            let text = "";
+            if (typeof msg.content === "string") {
+              text = msg.content;
+            } else if (Array.isArray(msg.content)) {
+              text = msg.content
+                .map((p: any) => {
+                  if (typeof p === "object" && p !== null && "text" in p) return (p as TextContent).text;
+                  return "";
+                })
+                .join(" ")
+                .trim();
+            }
+
+            let toolCallsText = "";
+            if (msg.role === "assistant") {
+              const am = msg as AssistantMessage;
+              const toolCalls = am.content.filter((c): c is ToolCall => c.type === "toolCall");
+
+              toolCallsText = toolCalls
+                .filter((tc) => verbose || !isInternal(tc.name))
+                .map((tc) => `call: ${tc.name}(${JSON.stringify(tc.arguments)})`)
+                .join("; ");
+            }
+
+            return [text, toolCallsText].filter(Boolean).join(" ");
+          }
+        }
+        return "";
+      };
+
+      const backboneIds: string[] = [];
+      let currId: string | undefined = currentLeafId ?? undefined;
+      while (currId) {
+        backboneIds.unshift(currId);
+        currId = parents.get(currId);
+      }
+
+      const sequence: SessionEntry[] = [];
+      backboneIds.forEach((id) => {
+        const entry = entryMap.get(id);
+        if (!entry) return;
+        sequence.push(entry);
+        const children = childrenMap.get(id) || [];
+        children.forEach((child) => {
+          if ((child.type === "branch_summary" || child.type === "compaction") && !backboneIds.includes(child.id)) {
+            sequence.push(child);
+          }
+        });
+      });
+
+      const isInteresting = (entry: SessionEntry): boolean => {
+        // 1. HEAD and Root
+        if (entry.id === currentLeafId) return true;
+        if (!parents.has(entry.id)) return true;
+
+        // 2. Explicit Tags (Labels)
+        if (sm.getLabel(entry.id)) return true;
+        if (entry.type === 'label') return true;
+
+        // 3. Structural Milestones (Summaries, Forks)
+        if (entry.type === 'branch_summary' || entry.type === 'compaction') return true;
+        if ((childrenMap.get(entry.id)?.length ?? 0) > 1) return true;
+
+        // 4. Natural Milestones (User Messages) - This is the key auto-tagging mechanism
+        if (entry.type === 'message' && (entry.message as any).role === 'user') return true;
+
+        return false;
+      };
+
+      const visibleSequenceIds = new Set<string>();
+      sequence.forEach(e => {
+        if (verbose || isInteresting(e)) {
+          visibleSequenceIds.add(e.id);
+        }
+      });
+
+      let visibleEntries = sequence.filter(e => visibleSequenceIds.has(e.id));
+      if (visibleEntries.length > limit) {
+        const allowedIds = new Set(visibleEntries.slice(-limit).map(e => e.id));
+        visibleSequenceIds.clear();
+        allowedIds.forEach(id => visibleSequenceIds.add(id));
+      }
+
+      const lines: string[] = [];
+      let hiddenCount = 0;
+
+      sequence.forEach((entry) => {
+        if (!visibleSequenceIds.has(entry.id)) {
+          hiddenCount++;
           return;
         }
 
-        // Navigate
-        await ctx.navigateTree(targetId, {
-          summarize: !!summary,
-          customInstructions: summary,
-          label: label,
-        });
-
-        ctx.ui.notify(`Switched to branch ${targetId}`, "info");
-      } catch (e) {
-        ctx.ui.notify(`Navigation failed: ${e instanceof Error ? e.message : String(e)}`, "error");
-      }
-    },
-  });
-
-  // Tool to list the session tree
-  pi.registerTool({
-    name: "tree_list",
-    label: "List Session Tree",
-    description: "List the full conversation tree structure with IDs and message snippets. Use this to find target IDs for branching.",
-    parameters: Type.Object({}) as any,
-    async execute(_id, _params, _signal, _onUpdate, ctx) {
-      const tree = ctx.sessionManager.getTree();
-      const currentLeafId = ctx.sessionManager.getLeafId();
-
-      // Recursive formatter
-      function formatNode(node: any, depth: number = 0): string {
-        const indent = "  ".repeat(depth);
-        // Handle both wrapper ({ entry, children }) and merged ({ ...entry, children }) patterns defensively
-        const entry = node.entry || node;
-        const isActive = entry.id === currentLeafId;
-        
-        let role = entry.type;
-        let content = "";
-
-        if (entry.type === "message" && entry.message) {
-          role = entry.message.role;
-          
-          if (role === "user") role = "User";
-          else if (role === "assistant") role = "Assistant";
-          else if (role === "system") role = "System";
-          else if (role === "toolResult") role = `Tool (${entry.message.toolName})`;
-          else if (role === "bashExecution") {
-            role = "Bash";
-            const cmd = entry.message.command || "";
-            const out = entry.message.output || "";
-            content = `$ ${cmd} -> ${out.slice(0, 30)}`;
-          } else if (role === "custom") {
-             role = `Custom (${entry.message.customType})`;
-             // content handled below if exists
-          }
-          
-          const msgContent = entry.message.content;
-          if (!content && msgContent) {
-            if (typeof msgContent === "string") {
-              content = msgContent;
-            } else if (Array.isArray(msgContent)) {
-              content = msgContent.map((c: any) => {
-                if (c.type === "text") return c.text;
-                if (c.type === "toolCall") return `[Call: ${c.name}]`;
-                if (c.type === "image") return "[Image]";
-                return "";
-              }).join(" ");
-            }
-          }
-        } else if (entry.type === "model_change") {
-          role = "Model Change";
-          content = `${entry.provider}/${entry.modelId}`;
-        } else if (entry.type === "compaction") {
-          role = "Compaction";
-          content = entry.summary || `${entry.tokensBefore} tokens`;
-        } else if (entry.type === "branch_summary") {
-          role = "Branch Summary";
-          content = entry.summary || `From ${entry.fromId}`;
-        } else if (entry.type === "label") {
-            // Labels are usually attached to entries, but if standalone:
-            role = "Label";
-            content = entry.label;
+        if (hiddenCount > 0) {
+          lines.push(`  :  ... (${hiddenCount} hidden messages) ...`);
+          hiddenCount = 0;
         }
 
-        const snippet = content.replace(/\n/g, " ").slice(0, 60) + (content.length > 60 ? "..." : "");
-        const label = ctx.sessionManager.getLabel(entry.id);
-        const labelStr = label ? ` [${label}]` : "";
-        const activeMarker = isActive ? " (* ACTIVE)" : "";
+        const isHead = entry.id === currentLeafId;
+        const label = sm.getLabel(entry.id);
+        const content = getMsgContent(entry).replace(/\s+/g, " ");
 
-        let line = `${indent}- [${entry.id}] (${role})${labelStr}: "${snippet}"${activeMarker}`;
-        
-        const children = node.children || [];
-        const childrenLines = children.map((child: any) => formatNode(child, depth + 1));
-        return [line, ...childrenLines].join("\n");
-      }
+        let role = entry.type.toUpperCase();
+        if (entry.type === "message") {
+          const m = entry.message;
+          role =
+            m.role === "assistant"
+              ? "AI"
+              : m.role === "user"
+                ? "USER"
+                : m.role === "bashExecution"
+                  ? "BASH"
+                  : "TOOL";
+        } else if (entry.type === "branch_summary" || entry.type === "compaction") {
+          role = "SUMMARY";
+        }
 
-      const formattedTree = tree.map((node: any) => formatNode(node)).join("\n");
+        const id = entry.id.slice(0, 8);
+        const meta = [isHead ? "HEAD" : null, label ? `tag: ${label}` : null].filter(Boolean).join(", ");
 
-      return {
-        content: [{ type: "text", text: formattedTree || "(Empty tree)" }],
-        details: { tree }, 
-      };
-    },
-  });
+        const body = content.length > 100 ? content.slice(0, 100) + "..." : content;
 
-  // Tool to switch branches
-  pi.registerTool({
-    name: "tree_switch",
-    label: "Switch Branch (Time Travel)",
-    description: "Switch the conversation context to a different branch (node), effectively 'time traveling' to a previous state. Use this when the current approach fails or you want to explore an alternative path.",
-    parameters: Type.Object({
-      targetId: Type.String({ description: "The ID of the target message/node to switch to." }),
-      summary: Type.Optional(Type.String({ description: "Summary of the abandoned branch and LESSONS LEARNED. Crucial for 'Guardrails': inject instructions like 'Approach A failed due to X, do not use library Y' to prevent repeating mistakes in the new branch." })),
-      label: Type.Optional(Type.String({ description: "Optional label to assign to the target node." })),
-    }) as any,
-    async execute(_id, params: any, _signal, _onUpdate, _ctx) {
-      // We cannot navigate directly here because it might disrupt the current turn.
-      // Instead, we trigger a hidden command via sendUserMessage to run after this turn.
-      
-      const args = JSON.stringify({
-        targetId: params.targetId,
-        summary: params.summary,
-        label: params.label,
+        const marker = isHead ? "*" : (role === "USER" ? "•" : "|");
+
+        lines.push(`${marker} ${id}${meta ? ` (${meta})` : ""} [${role}] ${body}`);
       });
 
-      // Use 'followUp' to ensure the current tool execution completes fully before navigation happens.
-      await pi.sendUserMessage(`/_tree_nav ${args}`, { deliverAs: "followUp" });
+      if (hiddenCount > 0) {
+        lines.push(`  :  ... (${hiddenCount} hidden messages) ...`);
+      }
 
-      return {
-        content: [{ type: "text", text: `Initiating switch to branch ${params.targetId}...` }],
-        details: { targetId: params.targetId },
-      };
+      // --- Context Dashboard (HUD) ---
+      const totalNodes = entryMap.size;
+      const currentDepth = backboneIds.length;
+
+      const usage = await ctx.getContextUsage();
+      let usageStr = "Unknown";
+      if (usage) {
+        usageStr = `${usage.percent.toFixed(1)}% (${formatTokens(usage.tokens)}/${formatTokens(usage.contextWindow)})`;
+      }
+
+      // Find the distance to the nearest tag
+      let stepsSinceTag = 0;
+      let nearestTagName = "None";
+      for (let i = backboneIds.length - 1; i >= 0; i--) {
+        const id = backboneIds[i];
+        const label = sm.getLabel(id);
+        if (label) {
+          nearestTagName = label;
+          break;
+        }
+        stepsSinceTag++;
+      }
+
+      const hud = [
+        `[Context Dashboard]`,
+        `• Context Usage:    ${usageStr}`,
+        `• Segment Size:     ${stepsSinceTag} steps since last tag '${nearestTagName}'`,
+        `---------------------------------------------------`
+      ].join("\n");
+
+      return { content: [{ type: "text", text: hud + "\n" + (lines.join("\n") || "(Root Path Only)") }], details: {} };
     },
   });
-  
-  // Tool to label a node
+
   pi.registerTool({
-    name: "tree_label",
-    label: "Label Node",
-    description: "Assign a label to a specific message node for easier reference.",
-    parameters: Type.Object({
-      entryId: Type.String({ description: "The ID of the node to label." }),
-      label: Type.String({ description: "The label text (e.g., 'checkpoint-1', 'successful-test')." }),
-    }) as any,
-    async execute(_id, params: any, _signal, _onUpdate, _ctx) {
-      pi.setLabel(params.entryId, params.label);
-      return {
-        content: [{ type: "text", text: `Label '${params.label}' assigned to node ${params.entryId}.` }],
-        details: {},
-      };
+    name: "context_checkout",
+    label: "Context Checkout",
+    description: "Navigate to ANY point in the conversation history (time travel). Use this to: 1. Switch Tasks (jump to a tagged state). 2. Backtrack (return to a clean state after failure). 3. Reset (jump to root). You can optionally carry a 'message' to summarize your recent progress into the new state.",
+    parameters: ContextCheckoutParams,
+    async execute(_id, params: Static<typeof ContextCheckoutParams>, _signal, _onUpdate, ctx) {
+      const sm = ctx.sessionManager as SessionManager;
+      const tid = resolveTargetId(sm, params.target);
+      if (params.message) await sm.branchWithSummary(tid, params.message);
+      else await sm.branch(tid);
+
+      // Fix: Label the NEW leaf (the summary node or the checkout target), not necessarily the old target ID.
+      // This ensures 'tagName' acts like naming the NEW branch tip.
+      const newLeaf = sm.getLeafId();
+      if (params.tagName && newLeaf) pi.setLabel(newLeaf, params.tagName);
+
+      return { content: [{ type: "text", text: `Checked out ${tid.slice(0, 7)}` }], details: {} };
+    },
+  });
+
+  pi.registerTool({
+    name: "context_tag",
+    label: "Context Tag",
+    description: "Create a tag (label) for a commit. Like 'git tag'.",
+    parameters: ContextTagParams,
+    async execute(_id, params: Static<typeof ContextTagParams>, _signal, _onUpdate, ctx) {
+      const sm = ctx.sessionManager as SessionManager;
+      const id = params.target ? resolveTargetId(sm, params.target) : (sm.getLeafId() ?? "");
+      pi.setLabel(id, params.name);
+      return { content: [{ type: "text", text: `Created tag '${params.name}' at ${id.slice(0, 7)}` }], details: {} };
     },
   });
 }

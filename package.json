@@ -1,7 +1,7 @@
 {
-  "name": "pi-tree-tools",
+  "name": "pi-context",
   "version": "1.0.0",
-  "description": "Pi extension for autonomous tree-based context management and time-travel debugging",
+  "description": "agent-driven context management tools",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -14,9 +14,11 @@
   },
   "keywords": [
     "pi-agent",
-    "pi-extension",
+    "pi-package",
     "context-management",
-    "time-travel"
+    "context-optimization",
+    "time-travel",
+    "checkpoint"
   ],
   "type": "module",
   "author": "",
@@ -34,6 +36,9 @@
   "pi": {
     "extensions": [
       "./dist/index.js"
+    ],
+    "skills": [
+      "./skills/context-management/SKILL.md"
     ]
   }
 }
