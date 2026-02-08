@@ -52,6 +52,7 @@ The log tree shows where you are and where you've been.
 | :--- | :--- | :--- |
 | **Usage > 50%** | **ATTENTION DECAY**: Recall fades, instruction adherence drops, and reasoning quality suffers. | **COMPRESS**: `context_checkout({ target: "task-start", message: "Consolidated progress...", tagName: "clean-up" })` |
 | **Segment > 10** | **LINEAR FATIGUE**: Hard to distinguish signal from noise in long threads. | **TAG**: `context_tag({ name: "safe-point" })` |
+| **Reading Huge Files / Web Search** | **LOW INFO DENSITY**: You read 500 lines but only need 5 lines. | **EXTRACT & REWIND**: `context_checkout({ target: "pre-read", message: "File content summary: [Key Configs...]", tagName: "extracted-info" })` |
 
 ### 2. Task Perspective (The Workflow)
 *Reflect on your current progress.*
@@ -78,7 +79,6 @@ Check where you are and how expensive the path is.
 
 > **CRITICAL REMINDER: CONTEXT IS NOT CODEBASE**
 > Checking out a new context branch **DOES NOT DELETE FILES**. It only resets your *conversation memory*. Your code on disk is safe.
->
 
 **Checkout Messages**
 
@@ -108,6 +108,8 @@ If `context_checkout` fails with "Target not found":
 2.  Select a valid ID from the log.
 3.  Retry the checkout.
 
+## Scenarios
+
 **Scenario: Task Complete & Confirmed**
 You finished Feature A. **Wait for user confirmation.**
 *User*: "Looks good. Now let's work on Feature B."
@@ -131,9 +133,48 @@ You tried approach A and it failed 5 times (Pollution).
 *Solution*: Backtrack and summarize the failure.
 
 ```javascript
+// Return to the state BEFORE the failed attempts
 context_checkout({
-  target: "task-start", // Go back to before the mess
+  target: "task-start", 
   message: "Approach A failed due to library incompatibility. Context clean. Starting Approach B.",
   tagName: "retry-approach-b"
 });
 ```
+
+**Scenario: Data Extraction / Research**
+You read a huge file (e.g., 2000 lines) or searched the web, but only found 3 relevant lines.
+*Problem*: The context is now polluted with 1997 lines of noise.
+*Solution*: Send the 3 lines back to your past self.
+
+```javascript
+// 1. Tag BEFORE you start reading/searching (proactive)
+context_tag({ name: "pre-research" });
+
+// ... (You read the huge file and find the key config) ...
+
+// 2. Checkout back to the tag, bringing ONLY the key info
+context_checkout({
+  target: "pre-research",
+  message: "Found the key configuration in line 150: 'MAX_CONNECTIONS=5'. The rest of the file was irrelevant.",
+  tagName: "research-complete"
+});
+```
+*Result*: Your context now contains the prompt, the tag, and the single message with the key config. The 2000 lines of noise are gone.
+
+**Scenario: Code Fix / "Time Travel" Debugging**
+You wrote code, it failed, you fixed it after 10 tries.
+*Problem*: Context has 10 failed attempts and error logs.
+*Solution*: Send the *final working code* back to the moment before you started coding.
+
+```javascript
+// 1. You realize you are in a messy debug loop.
+// 2. You finally get the code working.
+// 3. Checkout back to BEFORE you started the implementation.
+
+context_checkout({
+  target: "impl-start", 
+  message: "Implementation successful. Here is the working code: \n```javascript\n...\n```\nSkipped the debugging steps.",
+  tagName: "impl-done"
+});
+```
+*Result*: It looks like you got it right on the first try. Context is clean and focused.
