@@ -1,19 +1,16 @@
-import type {
-  ExtensionAPI,
-  SessionEntry,
-  SessionManager,
-  SessionMessageEntry,
-  BranchSummaryEntry,
-  CompactionEntry,
+import {
+  type ExtensionAPI,
+  type SessionEntry,
+  type SessionManager,
+  DynamicBorder,
 } from "@mariozechner/pi-coding-agent";
 import type {
-  ToolResultMessage,
-  AssistantMessage,
   ToolCall,
   TextContent,
   ImageContent,
 } from "@mariozechner/pi-ai";
 import { Type, type Static } from "@sinclair/typebox";
+import { Container, Text, Spacer } from "@mariozechner/pi-tui";
 
 // Define missing types locally as they are not exported from the main entry point
 interface SessionTreeNode {
@@ -42,7 +39,7 @@ const isInternal = (name: string) => ["context_log", "context_checkout", "contex
 
 const resolveTargetId = (sm: SessionManager, target: string): string => {
   if (target.toLowerCase() === "root") {
-    const tree = sm.getTree() as unknown as SessionTreeNode[];
+    const tree = sm.getTree();
     return tree.length > 0 ? tree[0].entry.id : target;
   }
   if (/^[0-9a-f]{8,}$/i.test(target)) return target;
@@ -55,7 +52,7 @@ const resolveTargetId = (sm: SessionManager, target: string): string => {
     return null;
   };
   // sm.getTree() returns the SDK's SessionTreeNode[], which is structurally compatible
-  return find(sm.getTree() as unknown as SessionTreeNode[]) || target;
+  return find(sm.getTree()) || target;
 };
 
 const formatTokens = (n: number) => {
@@ -72,7 +69,7 @@ export default function (pi: ExtensionAPI) {
     parameters: ContextLogParams,
     async execute(_id, params: Static<typeof ContextLogParams>, _signal, _onUpdate, ctx) {
       const sm = ctx.sessionManager as SessionManager;
-      const tree = sm.getTree() as unknown as SessionTreeNode[];
+      const tree = sm.getTree();
       const currentLeafId = sm.getLeafId();
       const verbose = params.verbose ?? false;
       const limit = params.limit ?? 50;
@@ -97,7 +94,7 @@ export default function (pi: ExtensionAPI) {
 
       const getMsgContent = (entry: SessionEntry): string => {
         if (entry.type === "branch_summary" || entry.type === "compaction") {
-          const e = entry as BranchSummaryEntry | CompactionEntry;
+          const e = entry;
           return e.summary || "[No summary provided]";
         }
         if (entry.type === "label") {
@@ -108,7 +105,7 @@ export default function (pi: ExtensionAPI) {
           const msg = entry.message;
 
           if (msg.role === "toolResult") {
-            const tr = msg as ToolResultMessage;
+            const tr = msg;
             if (!verbose && isInternal(tr.toolName)) return "";
 
             const extractText = (content: (TextContent | ImageContent)[]): string => {
@@ -146,8 +143,7 @@ export default function (pi: ExtensionAPI) {
 
             let toolCallsText = "";
             if (msg.role === "assistant") {
-              const am = msg as AssistantMessage;
-              const toolCalls = am.content.filter((c): c is ToolCall => c.type === "toolCall");
+              const toolCalls = msg.content.filter((c): c is ToolCall => c.type === "toolCall");
 
               toolCallsText = toolCalls
                 .filter((tc) => verbose || !isInternal(tc.name))
@@ -195,7 +191,7 @@ export default function (pi: ExtensionAPI) {
         if ((childrenMap.get(entry.id)?.length ?? 0) > 1) return true;
 
         // 4. Natural Milestones (User Messages) - This is the key auto-tagging mechanism
-        if (entry.type === 'message' && (entry.message as any).role === 'user') return true;
+        if (entry.type === 'message' && entry.message.role === 'user') return true;
 
         return false;
       };
@@ -304,12 +300,12 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, params: Static<typeof ContextCheckoutParams>, _signal, _onUpdate, ctx) {
       const sm = ctx.sessionManager as SessionManager;
       const tid = resolveTargetId(sm, params.target);
-      
+
       const currentLeaf = sm.getLeafId();
       if (currentLeaf === tid) {
         return { content: [{ type: "text", text: `Already at target ${tid.slice(0, 7)}` }], details: {} };
       }
-      
+
       const currentLabel = currentLeaf ? sm.getLabel(currentLeaf) : undefined;
       const origin = currentLabel ? `tag: ${currentLabel}` : (currentLeaf ? currentLeaf.slice(0, 8) : "unknown");
 
@@ -336,5 +332,149 @@ export default function (pi: ExtensionAPI) {
       pi.setLabel(id, params.name);
       return { content: [{ type: "text", text: `Created tag '${params.name}' at ${id.slice(0, 7)}` }], details: {} };
     },
+  });
+
+  pi.registerCommand("context", {
+    description: "Show context usage visualization",
+    handler: async (args, ctx) => {
+      const usage = await ctx.getContextUsage();
+      if (!usage) {
+        ctx.ui.notify("Context usage info not available.", "warning");
+        return;
+      }
+
+      const sm = ctx.sessionManager as SessionManager;
+      const branch = sm.getBranch();
+      const systemPrompt = ctx.getSystemPrompt();
+      const tools = pi.getActiveTools();
+      const allTools = pi.getAllTools();
+      const activeToolDefs = allTools.filter(t => tools.includes(t.name));
+
+      const estimateTokens = (text: string) => Math.ceil(text.length / 4);
+
+      let msgTokensRaw = 0;
+      let toolUseTokensRaw = 0;
+      let toolResultTokensRaw = 0;
+
+      for (const entry of branch) {
+        if (entry.type === "message") {
+          const m = entry.message;
+          if (m.role === "user") {
+            if (typeof m.content === "string") msgTokensRaw += estimateTokens(m.content);
+            else if (Array.isArray(m.content)) {
+              for (const p of m.content) if (p.type === "text") msgTokensRaw += estimateTokens(p.text);
+            }
+          } else if (m.role === "assistant") {
+            if (typeof m.content === "string") msgTokensRaw += estimateTokens(m.content);
+            else if (Array.isArray(m.content)) {
+              for (const p of m.content) {
+                if (p.type === "text") msgTokensRaw += estimateTokens(p.text);
+                if (p.type === "toolCall") toolUseTokensRaw += estimateTokens(JSON.stringify(p));
+              }
+            }
+          } else if (m.role === "toolResult") {
+            if (Array.isArray(m.content)) {
+              for (const p of m.content) if (p.type === "text") toolResultTokensRaw += estimateTokens(p.text);
+            }
+          } else if (m.role === "bashExecution") {
+            toolUseTokensRaw += estimateTokens(m.command || "");
+          }
+        } else if (entry.type === "branch_summary" || entry.type === "compaction") {
+          msgTokensRaw += estimateTokens(entry.summary || "");
+        }
+      }
+
+      const systemTokensRaw = estimateTokens(systemPrompt);
+      const toolDefTokensRaw = estimateTokens(JSON.stringify(activeToolDefs));
+      const totalActual = usage.tokens;
+      const limit = usage.contextWindow;
+
+      const totalRaw = systemTokensRaw + toolDefTokensRaw + msgTokensRaw + toolUseTokensRaw + toolResultTokensRaw;
+      const ratio = totalRaw > 0 ? (totalActual / totalRaw) : 1;
+
+      const systemTokens = Math.round(systemTokensRaw * ratio);
+      const toolDefTokens = Math.round(toolDefTokensRaw * ratio);
+      const msgTokens = Math.round(msgTokensRaw * ratio);
+      const toolUseTokens = Math.round(toolUseTokensRaw * ratio);
+      const toolResultTokens = Math.round(toolResultTokensRaw * ratio);
+
+      await ctx.ui.custom((tui, theme, kb, done) => {
+        const container = new Container();
+        container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+        container.addChild(new Text(theme.fg("accent", theme.bold(" Context Usage")), 1, 0));
+        container.addChild(new Spacer(1));
+
+        // Grouped by function and color
+        const categories = [
+          { label: "System Prompt", value: systemTokens, color: "muted" },
+          { label: "System Tools", value: toolDefTokens, color: "dim" },
+          { label: "Tool Call", value: toolUseTokens + toolResultTokens, color: "success" },
+          { label: "Messages", value: msgTokens, color: "accent" },
+        ];
+
+        const otherTokens = Math.max(0, totalActual - (systemTokens + toolDefTokens + msgTokens + toolUseTokens + toolResultTokens));
+        if (otherTokens > 10) categories.push({ label: "Other", value: otherTokens, color: "dim" });
+
+        categories.push({ label: "Available", value: Math.max(0, limit - totalActual), color: "borderMuted" });
+
+        const gridWidth = 10;
+        const gridHeight = 5;
+        const totalBlocks = gridWidth * gridHeight;
+
+        const blocks: { color: string, filled: boolean }[] = [];
+        categories.forEach((cat) => {
+          if (cat.label === "Available") return;
+          let count = Math.round((cat.value / limit) * totalBlocks);
+          if (count === 0 && cat.value > 0) count = 1;
+          for (let i = 0; i < count && blocks.length < totalBlocks; i++) {
+            blocks.push({ color: cat.color, filled: true });
+          }
+        });
+
+        while (blocks.length < totalBlocks) {
+          blocks.push({ color: "borderMuted", filled: false });
+        }
+
+        const gridLines: string[] = [];
+        for (let r = 0; r < gridHeight; r++) {
+          let rowStr = "";
+          for (let c = 0; c < gridWidth; c++) {
+            const b = blocks[r * gridWidth + c];
+            rowStr += theme.fg(b.color as any, b.filled ? "■ " : "□ ");
+          }
+          gridLines.push(rowStr.trimEnd());
+        }
+
+        const totalUsageTitle = `${theme.fg("text", theme.bold("Total Usage".padEnd(16)))} ${theme.fg("text", theme.bold(formatTokens(totalActual).padStart(7)))} ${theme.fg("text", theme.bold(`(${usage.percent.toFixed(1).padStart(5)}%)`))}`;
+
+        const catDetailLines = categories.map(cat => {
+          const labelStr = cat.label.padEnd(14);
+          const valStr = formatTokens(cat.value).padStart(7);
+          const rowPercent = ((cat.value / limit) * 100).toFixed(1).padStart(5);
+          const icon = cat.label === "Available" ? "□" : "■";
+          return `${theme.fg(cat.color as any, icon)} ${theme.fg("text", labelStr)} ${theme.fg("accent", valStr)} (${rowPercent}%)`;
+        });
+
+        const allDetailLines = [totalUsageTitle, "", ...catDetailLines];
+
+        const leftSideWidth = 20;
+        const maxH = Math.max(gridLines.length, allDetailLines.length);
+        for (let i = 0; i < maxH; i++) {
+          const left = (gridLines[i] || "").padEnd(leftSideWidth);
+          const right = allDetailLines[i] || "";
+          container.addChild(new Text(`    ${left}      ${right}`, 1, 0));
+        }
+
+        container.addChild(new Spacer(1));
+        container.addChild(new Text(theme.fg("dim", " Press any key to close"), 1, 0));
+        container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+
+        return {
+          render: (w) => container.render(w),
+          invalidate: () => container.invalidate(),
+          handleInput: (data) => done(undefined),
+        };
+      }, { overlay: true });
+    }
   });
 }

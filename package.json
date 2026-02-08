@@ -7,11 +7,7 @@
   "files": [
     "dist"
   ],
-  "scripts": {
-    "build": "tsc",
-    "watch": "tsc -w",
-    "prepublishOnly": "npm run build"
-  },
+  "scripts": {},
   "keywords": [
     "pi-agent",
     "pi-package",
@@ -39,6 +35,7 @@
     ],
     "skills": [
       "./skills/context-management/SKILL.md"
-    ]
+    ],
+    "image": "https://github.com/ttttmr/pi-context/raw/refs/heads/main/img/context.png"
   }
 }

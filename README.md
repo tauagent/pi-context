@@ -1,6 +1,8 @@
 # Pi Context Extension
 
-**Git-like context management for AI agents.**
+A Git-like context management tool that allows AI agents to proactively manage their context.
+
+Inspired by kimi-cli d-mail, implementing lossless time travel on the Pi session tree.
 
 ## Installation
 
@@ -8,7 +10,25 @@
 pi install npm:pi-context
 ```
 
-## Features
+## Usage
+
+### For Humans
+
+Load the skill to enable the workflow:
+
+```bash
+/skill:context-management
+```
+
+View detailed context window usage and token distribution with a visual dashboard. (like `claude code /context`)
+
+```bash
+/context
+```
+
+![](img/context.png)
+
+### For Agents
 
 This extension adds the `context-management` skill with three core tools:
 
@@ -20,11 +40,3 @@ This extension adds the `context-management` skill with three core tools:
 
 3.  **⏪ Compress (`context_checkout`)**
 `git checkout` Move the HEAD pointer to any tag or commit ID. Compress completed tasks into a summary to free up context window space.
-
-## Usage
-
-Load the skill to enable the workflow:
-
-```bash
-/skill:context-management
-```
