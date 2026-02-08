@@ -4,6 +4,8 @@ A Git-like context management tool that allows AI agents to proactively manage t
 
 Inspired by kimi-cli d-mail, implementing lossless time travel on the Pi session tree.
 
+Blog: [中文](https://blog.xlab.app/p/6a966aeb/) [EN](https://blog.xlab.app/p/51d26495/)
+
 ## Installation
 
 ```bash
