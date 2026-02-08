@@ -1,34 +1,80 @@
-# Pi Context Management
+# Pi Context Extension
 
-An advanced context management extension for Pi Coding Agent that treats conversation history like a Git repository. It allows you to:
-- **Save Checkpoints**: Tag stable states before risky changes.
-- **Time Travel**: Revert to any previous point in history.
-- **Switch Tasks**: Jump between different tasks without losing context.
-- **Visualize History**: See a clear, Git-like graph of your conversation tree.
+Git-like time travel and context optimization for AI agents.
+
+This extension transforms the abstract concept of "Context Window Management" into a concrete economic system for AI agents, allowing them to:
+1.  **Structure**: Bookmark stable states (Tags).
+2.  **Monitor**: Visualize their memory usage (Log).
+3.  **Compress**: Squash history to free up tokens (Checkout).
 
 ## Installation
+
+Add the package to your `pi` configuration or install globally:
 
 ```bash
 pi install npm:pi-context
 ```
 
-## How It Works
+## Usage
 
-This extension introduces three powerful tools:
+This extension provides the `context-management` skill. Load it to enable the workflow:
 
-1.  **`context_log`**: View your history. It automatically collapses intermediate AI steps and highlights key milestones (User messages, Tags, Branch points).
-2.  **`context_checkout`**: Navigate to any point in history. You can carry a **summary** of your current work with you, ensuring you don't lose context when switching tasks.
-3.  **`context_tag`**: Label a specific state (e.g., "v1-stable") for easy reference.
+```bash
+/skill:context-management
+```
 
-## Example Workflow
+### 1. Monitor Context (`context_log`)
 
-1.  **Work on Task A**:
-    - Tag it: `context_tag({ name: "task-a-done" })`
-2.  **User asks for Task B**:
-    - Jump to a clean state: `context_checkout({ target: "root", message: "Finished Task A. Starting Task B." })`
-3.  **User asks about Task A again**:
-    - Jump back: `context_checkout({ target: "task-a-done", message: "Pausing Task B. Returning to Task A." })`
+Visualize your conversation history and current token usage.
 
-## Configuration
+- **HUD**: Shows usage percentage (e.g., `85% (108k/128k)`) and segment size (risk).
+- **Graph**: Shows a Git-like tree of conversation turns.
+    - **User Messages**: Automatically treated as milestones.
+    - **Tags**: Explicit bookmarks.
+    - **Hidden**: Low-value intermediate steps (thinking/tools) are collapsed by default.
 
-No configuration needed. Just install and start using the tools.
+### 2. Save Checkpoints (`context_tag`)
+
+Create named tags for stable states. Think of these as "Save Games" or "Git Tags".
+
+```javascript
+// Mark a stable point
+context_tag({ name: "feature-a-done" })
+```
+
+### 3. Time Travel & Squash (`context_checkout`)
+
+Move the HEAD pointer to any tag or commit ID. Use this to:
+- **Undo**: Go back to a previous state if you mess up.
+- **Squash**: Consolidate history into a summary message at a new root.
+
+```javascript
+// Undo: Go back to 'start' tag
+context_checkout({ 
+  target: "start",
+  message: "Backtracking to start. Approach A failed due to recursion limit." 
+})
+
+// Squash: Go to 'root' but keep a summary of work done
+context_checkout({ 
+  target: "root", 
+  message: "Completed Feature A. Summary: 1. Created file X. 2. Updated tests.",
+  tagName: "clean-slate" 
+})
+```
+
+## The "Context Economy"
+
+Your context window is limited capital.
+- **Assets**: Tagged, stable code.
+- **Liabilities**: Long, untagged thinking chains.
+- **Bankruptcy**: Running out of tokens mid-task.
+
+**Strategy:**
+1.  **Audit**: Check `context_log` frequently.
+2.  **Liquidate**: Use `context_checkout` to "cash out" finished tasks into summaries.
+3.  **Invest**: Use freed tokens for the next complex task.
+
+## License
+
+MIT

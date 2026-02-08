@@ -29,7 +29,7 @@ const ContextLogParams = Type.Object({
 
 const ContextCheckoutParams = Type.Object({
   target: Type.String({ description: "The commit hash (message ID) or tag (label) to switch to. Use 'root' to jump to the very beginning." }),
-  message: Type.Optional(Type.String({ description: "The 'Context Carryover Message'. A summary of your *current* progress/lessons that you want to bring with you to the new state. This ensures you don't lose key information when switching contexts." })),
+  message: Type.String({ description: "The 'Context Carryover Message'. A summary of your *current* progress/lessons that you want to bring with you to the new state. This ensures you don't lose key information when switching contexts." }),
   tagName: Type.Optional(Type.String({ description: "Optional tag name to apply to the target state immediately after checking out." })),
 });
 
@@ -38,7 +38,7 @@ const ContextTagParams = Type.Object({
   target: Type.Optional(Type.String({ description: "Optional commit hash (message ID) to tag. Default is HEAD." })),
 });
 
-const isInternal = (name: string) => ["context_log", "context_checkout", "context_tag", "context_list", "context_switch", "context_merge", "context_checkpoint"].includes(name);
+const isInternal = (name: string) => ["context_log", "context_checkout", "context_tag"].includes(name);
 
 const resolveTargetId = (sm: SessionManager, target: string): string => {
   if (target.toLowerCase() === "root") {
@@ -186,9 +186,9 @@ export default function (pi: ExtensionAPI) {
         if (entry.id === currentLeafId) return true;
         if (!parents.has(entry.id)) return true;
 
-        // 2. Explicit Tags (Labels)
+        // 2. Explicit Tags (Labels) - Only show the TAGGED node, not the label node itself
         if (sm.getLabel(entry.id)) return true;
-        if (entry.type === 'label') return true;
+        if (entry.type === 'label') return false; // Hide label nodes, they are redundant
 
         // 3. Structural Milestones (Summaries, Forks)
         if (entry.type === 'branch_summary' || entry.type === 'compaction') return true;
@@ -248,7 +248,8 @@ export default function (pi: ExtensionAPI) {
         }
 
         const id = entry.id.slice(0, 8);
-        const meta = [isHead ? "HEAD" : null, label ? `tag: ${label}` : null].filter(Boolean).join(", ");
+        const isRoot = !parents.has(entry.id);
+        const meta = [isRoot ? "ROOT" : null, isHead ? "HEAD" : null, label ? `tag: ${label}` : null].filter(Boolean).join(", ");
 
         const body = content.length > 100 ? content.slice(0, 100) + "..." : content;
 
@@ -303,8 +304,13 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, params: Static<typeof ContextCheckoutParams>, _signal, _onUpdate, ctx) {
       const sm = ctx.sessionManager as SessionManager;
       const tid = resolveTargetId(sm, params.target);
-      if (params.message) await sm.branchWithSummary(tid, params.message);
-      else await sm.branch(tid);
+      
+      const currentLeaf = sm.getLeafId();
+      const currentLabel = currentLeaf ? sm.getLabel(currentLeaf) : undefined;
+      const origin = currentLabel ? `tag: ${currentLabel}` : (currentLeaf ? currentLeaf.slice(0, 8) : "unknown");
+
+      const enrichedMessage = `${params.message} (branched from ${origin})`;
+      await sm.branchWithSummary(tid, enrichedMessage);
 
       // Fix: Label the NEW leaf (the summary node or the checkout target), not necessarily the old target ID.
       // This ensures 'tagName' acts like naming the NEW branch tip.
