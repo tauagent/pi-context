@@ -9,6 +9,11 @@ description: Strategies for efficient context management using context_log, cont
 
 Your context window is a limited resource. As the conversation grows, "pollution" (noise, failed attempts, intermediate logs) degrades your reasoning.
 
+**CRITICAL: YOU ARE RESPONSIBLE FOR YOUR CONTEXT STRUCTURE.**
+**DO NOT WAIT FOR THE USER TO TELL YOU TO MANAGE CONTEXT.**
+
+You must proactively use these tools to keep your reasoning sharp and your history structured.
+
 **Use this skill to optimize your "Context Economy":**
 1.  **Structure (Save Points)**: Use `context_tag` to bookmark stable states. **Untagged progress is risky.** Always tag before a major step.
 2.  **Monitor (Awareness)**: Use `context_log` to check your "Usage" and "Segment Size". **Don't fly blind.** High usage degrades your reasoning.
@@ -57,25 +62,7 @@ The log tree shows where you are and where you've been.
 | **"I think I finished the task"** | **PENDING**: User might ask for tweaks. | **TAG ONLY**: `context_tag({ name: "feature-x-candidate" })`. **Do not squash yet.** |
 | **"User starts a NEW task"** | **SAFE TO CLOSE**: Old context is now clutter. | **SQUASH**: `context_checkout({ target: "root", message: "Prev task done. Summary...", tagName: "clean-slate" })` |
 
-## Writing Effective Checkout Messages
-
-The `message` parameter in `context_checkout` is **MANDATORY**. It is your lifeline to your past self.
-A good message preserves critical context that would otherwise be lost.
-
-**Structure:** `[Status] + [Reason] + [Carryover Data]`
-
-*   **Status**: What did you just finish or stop doing?
-*   **Reason**: Why are you branching/moving? (e.g., "Too much noise", "Task complete", "Failed attempt")
-*   **Carryover**: What specific details (IDs, file paths, user constraints) must be remembered?
-
-**Examples:**
-
-*   *Good (Resetting after failure)*: "Abandoning the recursive approach (infinite loop). Switching back to iterative. **Carryover**: The test case `test_retry_logic` is the one failing."
-*   *Good (Cleaning up)*: "Completed authentication module. All tests passed. **Carryover**: The user ID is stored in `localStorage` under `auth_token`. Moving to Dashboard UI."
-*   *Bad*: "Switching context." (Too vague - you will forget why)
-*   *Bad*: "Done." (What is done? What did we learn?)
-
-## Tools & Workflows
+## Workflow Best Practices
 
 ### 1. Build the ToC (`context_tag`)
 Don't just work blindly. Tag your milestones so you (and the user) can see the structure.
@@ -92,8 +79,34 @@ Check where you are and how expensive the path is.
 > **CRITICAL REMINDER: CONTEXT IS NOT CODEBASE**
 > Checking out a new context branch **DOES NOT DELETE FILES**. It only resets your *conversation memory*. Your code on disk is safe.
 >
-> **Safety Net (Undo Button):**
-> `context_checkout` is non-destructive. If you squash too much, use `context_log` to find the old branch ID and checkout back to it.
+
+**Checkout Messages**
+
+The `message` is your lifeline to your past self.
+A good message preserves critical context that would otherwise be lost.
+
+Structure: `[Status] + [Reason] + [Important Changes] + [Carryover Data]`
+
+*   **Status**: What did you just finish or stop doing?
+*   **Reason**: Why are you branching/moving? (e.g., "Too much noise", "Task complete", "Failed attempt")
+*   **Important Changes**: What files or logic have been modified? (This checkout only resets *conversation history*, NOT disk files, so you must remember what changed.)
+*   **Carryover**: What specific details (IDs, file paths, user constraints) must be remembered?
+
+Examples:
+
+*   *Good (Resetting after failure)*: "Abandoning the recursive approach (infinite loop). Switching back to iterative. **Important Changes**: Modified `utils/recursion.ts`. **Carryover**: The test case `test_retry_logic` is the one failing."
+*   *Good (Cleaning up)*: "Completed authentication module. All tests passed. **Important Changes**: Created `auth/` directory and updated `routes.ts`. **Carryover**: The user ID is stored in `localStorage` under `auth_token`. Moving to Dashboard UI."
+*   *Bad*: "Switching context." (Too vague - you will forget why)
+*   *Bad*: "Done." (What is done? What did we learn?)
+
+**Safety Net (Undo Button):**
+`context_checkout` is non-destructive. If you squash too much, use `context_log` to find the old branch ID and checkout back to it.
+
+**Checkout Failures**
+If `context_checkout` fails with "Target not found":
+1.  Run `context_log` immediately to see available commit IDs and tags.
+2.  Select a valid ID from the log.
+3.  Retry the checkout.
 
 **Scenario: Task Complete & Confirmed**
 You finished Feature A. **Wait for user confirmation.**

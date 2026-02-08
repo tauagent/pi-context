@@ -28,14 +28,14 @@ const ContextLogParams = Type.Object({
 });
 
 const ContextCheckoutParams = Type.Object({
-  target: Type.String({ description: "The commit hash (message ID) or tag (label) to switch to. Use 'root' to jump to the very beginning." }),
-  message: Type.String({ description: "The 'Context Carryover Message'. A summary of your *current* progress/lessons that you want to bring with you to the new state. This ensures you don't lose key information when switching contexts." }),
+  target: Type.String({ description: "Where to jump/squash to. Can be a tag name (e.g., 'task-start'), a commit ID, or 'root'. This is the base for your new branch." }),
+  message: Type.String({ description: "The 'Carryover Message' for the new branch. A summary of your *current* progress/lessons that you want to bring with you to the new state. This ensures you don't lose key information when switching contexts. Good summary message: '[Status] + [Reason] + [Important Changes] + [Carryover Data]'" }),
   tagName: Type.Optional(Type.String({ description: "Optional tag name to apply to the target state immediately after checking out." })),
 });
 
 const ContextTagParams = Type.Object({
-  name: Type.String({ description: "The tag name (label). Works like 'git tag <name>'." }),
-  target: Type.Optional(Type.String({ description: "Optional commit hash (message ID) to tag. Default is HEAD." })),
+  name: Type.String({ description: "The tag/milestone name. Use meaningful names." }),
+  target: Type.Optional(Type.String({ description: "The commit ID to tag. Defaults to HEAD (current state)." })),
 });
 
 const isInternal = (name: string) => ["context_log", "context_checkout", "context_tag"].includes(name);
@@ -68,7 +68,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "context_log",
     label: "Context Log",
-    description: "Show the conversation history graph. Analogous to 'git log --graph --oneline --decorate'. Use this to see branches, tags, and commits (messages).",
+    description: "Show the entire history structure (status, message, tags, milestones). Analogous to 'git log --graph --oneline --decorate'",
     parameters: ContextLogParams,
     async execute(_id, params: Static<typeof ContextLogParams>, _signal, _onUpdate, ctx) {
       const sm = ctx.sessionManager as SessionManager;
@@ -299,13 +299,17 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "context_checkout",
     label: "Context Checkout",
-    description: "Navigate to ANY point in the conversation history (time travel). Use this to: 1. Switch Tasks (jump to a tagged state). 2. Backtrack (return to a clean state after failure). 3. Reset (jump to root). You can optionally carry a 'message' to summarize your recent progress into the new state.",
+    description: "Navigate to ANY point in the conversation history. This checkout only resets *conversation history*, NOT disk files. ALWAYS provide a detailed 'message' to bridge context.",
     parameters: ContextCheckoutParams,
     async execute(_id, params: Static<typeof ContextCheckoutParams>, _signal, _onUpdate, ctx) {
       const sm = ctx.sessionManager as SessionManager;
       const tid = resolveTargetId(sm, params.target);
       
       const currentLeaf = sm.getLeafId();
+      if (currentLeaf === tid) {
+        return { content: [{ type: "text", text: `Already at target ${tid.slice(0, 7)}` }], details: {} };
+      }
+      
       const currentLabel = currentLeaf ? sm.getLabel(currentLeaf) : undefined;
       const origin = currentLabel ? `tag: ${currentLabel}` : (currentLeaf ? currentLeaf.slice(0, 8) : "unknown");
 
@@ -324,7 +328,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "context_tag",
     label: "Context Tag",
-    description: "Create a tag (label) for a commit. Like 'git tag'.",
+    description: "Creates a 'Save Point' (Bookmark) in the history. Use this before trying risky changes or when a feature is stable. 'Untagged progress is risky'.",
     parameters: ContextTagParams,
     async execute(_id, params: Static<typeof ContextTagParams>, _signal, _onUpdate, ctx) {
       const sm = ctx.sessionManager as SessionManager;
