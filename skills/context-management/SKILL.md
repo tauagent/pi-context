@@ -85,12 +85,12 @@ Check where you are and how expensive the path is.
 The `message` is your lifeline to your past self.
 A good message preserves critical context that would otherwise be lost.
 
-Structure: `[Status] + [Reason] + [Important Changes] + [Carryover Data]`
+Structure: `[Status] + [Reason] + [Carryover Data] + [Important Changes]`
 
 *   **Status**: What did you just finish or stop doing?
 *   **Reason**: Why are you branching/moving? (e.g., "Too much noise", "Task complete", "Failed attempt")
+*   **Carryover**: What specific details (e.g., IDs, file paths, user constraints) must be remembered?
 *   **Important Changes**: What files or logic have been modified? (This checkout only resets *conversation history*, NOT disk files, so you must remember what changed.)
-*   **Carryover**: What specific details (IDs, file paths, user constraints) must be remembered?
 
 Examples:
 

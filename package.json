@@ -1,6 +1,6 @@
 {
   "name": "pi-context",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "agent-driven context management tools",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -22,13 +22,8 @@
   "type": "module",
   "author": "",
   "license": "MIT",
-  "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*"
-  },
-  "dependencies": {
-    "@sinclair/typebox": "^0.34.13"
-  },
   "devDependencies": {
+    "@sinclair/typebox": "^0.34.13",
     "typescript": "^5.7.2",
     "@mariozechner/pi-coding-agent": "latest"
   },

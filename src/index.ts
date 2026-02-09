@@ -35,7 +35,7 @@ const ContextTagParams = Type.Object({
   target: Type.Optional(Type.String({ description: "The commit ID to tag. Defaults to HEAD (current state)." })),
 });
 
-const isInternal = (name: string) => ["context_log", "context_checkout", "context_tag"].includes(name);
+const isInternal = (name: string) => ["context_tag", "context_log", "context_checkout"].includes(name);
 
 const resolveTargetId = (sm: SessionManager, target: string): string => {
   if (target.toLowerCase() === "root") {
@@ -63,34 +63,44 @@ const formatTokens = (n: number) => {
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
+    name: "context_tag",
+    label: "Context Tag",
+    description: "Creates a 'Save Point' (Bookmark) in the history. Use this before trying risky changes or when a feature is stable. 'Untagged progress is risky'.",
+    parameters: ContextTagParams,
+    async execute(_id, params: Static<typeof ContextTagParams>, _signal, _onUpdate, ctx) {
+      const sm = ctx.sessionManager as SessionManager;
+      const id = params.target ? resolveTargetId(sm, params.target) : (sm.getLeafId() ?? "");
+      pi.setLabel(id, params.name);
+      return { content: [{ type: "text", text: `Created tag '${params.name}' at ${id.slice(0, 7)}` }], details: {} };
+    },
+  });
+
+  pi.registerTool({
     name: "context_log",
     label: "Context Log",
     description: "Show the entire history structure (status, message, tags, milestones). Analogous to 'git log --graph --oneline --decorate'",
     parameters: ContextLogParams,
     async execute(_id, params: Static<typeof ContextLogParams>, _signal, _onUpdate, ctx) {
       const sm = ctx.sessionManager as SessionManager;
-      const tree = sm.getTree();
+      const branch = sm.getBranch();
       const currentLeafId = sm.getLeafId();
       const verbose = params.verbose ?? false;
       const limit = params.limit ?? 50;
 
-      const parents = new Map<string, string>();
-      const entryMap = new Map<string, SessionEntry>();
-      const childrenMap = new Map<string, SessionEntry[]>();
+      const backboneIds = new Set(branch.map((e) => e.id));
+      const sequence: SessionEntry[] = [];
 
-      const walk = (nodes: SessionTreeNode[], pId?: string) => {
-        for (const n of nodes) {
-          entryMap.set(n.entry.id, n.entry);
-          if (pId) {
-            parents.set(n.entry.id, pId);
-            const siblings = childrenMap.get(pId) || [];
-            siblings.push(n.entry);
-            childrenMap.set(pId, siblings);
+      branch.forEach((entry) => {
+        sequence.push(entry);
+
+        // Preserve side-summary logic: Show branch summaries/compactions that are off-path
+        const children = sm.getChildren(entry.id);
+        children.forEach((child) => {
+          if ((child.type === "branch_summary" || child.type === "compaction") && !backboneIds.has(child.id)) {
+            sequence.push(child);
           }
-          walk(n.children, n.entry.id);
-        }
-      };
-      walk(tree);
+        });
+      });
 
       const getMsgContent = (entry: SessionEntry): string => {
         if (entry.type === "branch_summary" || entry.type === "compaction") {
@@ -157,40 +167,22 @@ export default function (pi: ExtensionAPI) {
         return "";
       };
 
-      const backboneIds: string[] = [];
-      let currId: string | undefined = currentLeafId ?? undefined;
-      while (currId) {
-        backboneIds.unshift(currId);
-        currId = parents.get(currId);
-      }
-
-      const sequence: SessionEntry[] = [];
-      backboneIds.forEach((id) => {
-        const entry = entryMap.get(id);
-        if (!entry) return;
-        sequence.push(entry);
-        const children = childrenMap.get(id) || [];
-        children.forEach((child) => {
-          if ((child.type === "branch_summary" || child.type === "compaction") && !backboneIds.includes(child.id)) {
-            sequence.push(child);
-          }
-        });
-      });
-
       const isInteresting = (entry: SessionEntry): boolean => {
         // 1. HEAD and Root
         if (entry.id === currentLeafId) return true;
-        if (!parents.has(entry.id)) return true;
+        if (branch.length > 0 && entry.id === branch[0].id) return true;
 
         // 2. Explicit Tags (Labels) - Only show the TAGGED node, not the label node itself
         if (sm.getLabel(entry.id)) return true;
         if (entry.type === 'label') return false; // Hide label nodes, they are redundant
 
-        // 3. Structural Milestones (Summaries, Forks)
+        // 3. Structural Milestones (Summaries)
         if (entry.type === 'branch_summary' || entry.type === 'compaction') return true;
-        if ((childrenMap.get(entry.id)?.length ?? 0) > 1) return true;
 
-        // 4. Natural Milestones (User Messages) - This is the key auto-tagging mechanism
+        // 4. Branch Points (Forks)
+        if (sm.getChildren(entry.id).length > 1) return true;
+
+        // 5. Natural Milestones (User Messages) - This is the key auto-tagging mechanism
         if (entry.type === 'message' && entry.message.role === 'user') return true;
 
         return false;
@@ -244,7 +236,7 @@ export default function (pi: ExtensionAPI) {
         }
 
         const id = entry.id.slice(0, 8);
-        const isRoot = !parents.has(entry.id);
+        const isRoot = branch.length > 0 && entry.id === branch[0].id;
         const meta = [isRoot ? "ROOT" : null, isHead ? "HEAD" : null, label ? `tag: ${label}` : null].filter(Boolean).join(", ");
 
         const body = content.length > 100 ? content.slice(0, 100) + "..." : content;
@@ -259,9 +251,6 @@ export default function (pi: ExtensionAPI) {
       }
 
       // --- Context Dashboard (HUD) ---
-      const totalNodes = entryMap.size;
-      const currentDepth = backboneIds.length;
-
       const usage = await ctx.getContextUsage();
       let usageStr = "Unknown";
       if (usage) {
@@ -271,8 +260,8 @@ export default function (pi: ExtensionAPI) {
       // Find the distance to the nearest tag
       let stepsSinceTag = 0;
       let nearestTagName = "None";
-      for (let i = backboneIds.length - 1; i >= 0; i--) {
-        const id = backboneIds[i];
+      for (let i = branch.length - 1; i >= 0; i--) {
+        const id = branch[i].id;
         const label = sm.getLabel(id);
         if (label) {
           nearestTagName = label;
@@ -309,7 +298,7 @@ export default function (pi: ExtensionAPI) {
       const currentLabel = currentLeaf ? sm.getLabel(currentLeaf) : undefined;
       const origin = currentLabel ? `tag: ${currentLabel}` : (currentLeaf ? currentLeaf.slice(0, 8) : "unknown");
 
-      const enrichedMessage = `${params.message} (branched from ${origin})`;
+      const enrichedMessage = `(summary from ${origin})\n${params.message}`;
       await sm.branchWithSummary(tid, enrichedMessage);
 
       // Fix: Label the NEW leaf (the summary node or the checkout target), not necessarily the old target ID.
@@ -317,22 +306,10 @@ export default function (pi: ExtensionAPI) {
       const newLeaf = sm.getLeafId();
       if (params.tagName && newLeaf) pi.setLabel(newLeaf, params.tagName);
 
-      return { content: [{ type: "text", text: `Checked out ${tid.slice(0, 7)}` }], details: {} };
+      return { content: [{ type: "text", text: `Checked out ${tid.slice(0, 7)} with tag: ${params.tagName || "none"}\nmessage: ${enrichedMessage}` }], details: {} };
     },
   });
 
-  pi.registerTool({
-    name: "context_tag",
-    label: "Context Tag",
-    description: "Creates a 'Save Point' (Bookmark) in the history. Use this before trying risky changes or when a feature is stable. 'Untagged progress is risky'.",
-    parameters: ContextTagParams,
-    async execute(_id, params: Static<typeof ContextTagParams>, _signal, _onUpdate, ctx) {
-      const sm = ctx.sessionManager as SessionManager;
-      const id = params.target ? resolveTargetId(sm, params.target) : (sm.getLeafId() ?? "");
-      pi.setLabel(id, params.name);
-      return { content: [{ type: "text", text: `Created tag '${params.name}' at ${id.slice(0, 7)}` }], details: {} };
-    },
-  });
 
   pi.registerCommand("context", {
     description: "Show context usage visualization",
