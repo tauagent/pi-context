@@ -27,7 +27,7 @@ const ContextLogParams = Type.Object({
 const ContextCheckoutParams = Type.Object({
   target: Type.String({ description: "Where to jump/squash to. Can be a tag name (e.g., 'task-start'), a commit ID, or 'root'. This is the base for your new branch." }),
   message: Type.String({ description: "The 'Carryover Message' for the new branch. A summary of your *current* progress/lessons that you want to bring with you to the new state. This ensures you don't lose key information when switching contexts. Good summary message: '[Status] + [Reason] + [Important Changes] + [Carryover Data]'" }),
-  tagName: Type.Optional(Type.String({ description: "Optional tag name to apply to the target state immediately after checking out." })),
+  backupTag: Type.Optional(Type.String({ description: "Optional tag name to apply to the CURRENT state before checking out. Use this to create an automatic backup of the history you are about to leave/squash." })),
 });
 
 const ContextTagParams = Type.Object({
@@ -69,9 +69,45 @@ export default function (pi: ExtensionAPI) {
     parameters: ContextTagParams,
     async execute(_id, params: Static<typeof ContextTagParams>, _signal, _onUpdate, ctx) {
       const sm = ctx.sessionManager as SessionManager;
-      const id = params.target ? resolveTargetId(sm, params.target) : (sm.getLeafId() ?? "");
+      let id = params.target ? resolveTargetId(sm, params.target) : undefined;
+
+      if (!id) {
+        // Auto-resolve: Find the last "interesting" node to tag.
+        // We skip ToolResults (which look ugly tagged) and internal-only Assistant messages (which look empty).
+        const branch = sm.getBranch();
+        for (let i = branch.length - 1; i >= 0; i--) {
+          const entry = branch[i];
+
+          // 1. Check ToolResults
+          if (entry.type === 'message' && entry.message.role === 'toolResult') {
+            const tr = entry.message as any;
+            if (isInternal(tr.toolName)) continue;
+
+            // Public tool result is a valid target
+            id = entry.id;
+            break;
+          }
+
+          // 2. Check Assistant messages for visibility
+          if (entry.type === 'message' && entry.message.role === 'assistant') {
+            const m = entry.message;
+            const hasInternalTool = m.content.some(c => c.type === 'toolCall' && isInternal(c.name));
+
+            if (!hasInternalTool) {
+              id = entry.id;
+              break;
+            }
+          }
+
+          id = entry.id;
+          break;
+        }
+        // Fallback to leaf if search failed
+        if (!id) id = sm.getLeafId() ?? "";
+      }
+
       pi.setLabel(id, params.name);
-      return { content: [{ type: "text", text: `Created tag '${params.name}' at ${id.slice(0, 7)}` }], details: {} };
+      return { content: [{ type: "text", text: `Created tag '${params.name}' at ${id}` }], details: {} };
     },
   });
 
@@ -235,7 +271,7 @@ export default function (pi: ExtensionAPI) {
           role = "SUMMARY";
         }
 
-        const id = entry.id.slice(0, 8);
+        const id = entry.id;
         const isRoot = branch.length > 0 && entry.id === branch[0].id;
         const meta = [isRoot ? "ROOT" : null, isHead ? "HEAD" : null, label ? `tag: ${label}` : null].filter(Boolean).join(", ");
 
@@ -288,25 +324,23 @@ export default function (pi: ExtensionAPI) {
     parameters: ContextCheckoutParams,
     async execute(_id, params: Static<typeof ContextCheckoutParams>, _signal, _onUpdate, ctx) {
       const sm = ctx.sessionManager as SessionManager;
+
       const tid = resolveTargetId(sm, params.target);
 
       const currentLeaf = sm.getLeafId();
       if (currentLeaf === tid) {
-        return { content: [{ type: "text", text: `Already at target ${tid.slice(0, 7)}` }], details: {} };
+        return { content: [{ type: "text", text: `Already at target ${tid}` }], details: {} };
       }
-
+      if (params.backupTag && currentLeaf) {
+        pi.setLabel(currentLeaf, params.backupTag);
+      }
       const currentLabel = currentLeaf ? sm.getLabel(currentLeaf) : undefined;
-      const origin = currentLabel ? `tag: ${currentLabel}` : (currentLeaf ? currentLeaf.slice(0, 8) : "unknown");
+      const origin = currentLabel ? `tag: ${currentLabel}` : (currentLeaf || "unknown");
 
       const enrichedMessage = `(summary from ${origin})\n${params.message}`;
       await sm.branchWithSummary(tid, enrichedMessage);
 
-      // Fix: Label the NEW leaf (the summary node or the checkout target), not necessarily the old target ID.
-      // This ensures 'tagName' acts like naming the NEW branch tip.
-      const newLeaf = sm.getLeafId();
-      if (params.tagName && newLeaf) pi.setLabel(newLeaf, params.tagName);
-
-      return { content: [{ type: "text", text: `Checked out ${tid.slice(0, 7)} with tag: ${params.tagName || "none"}\nmessage: ${enrichedMessage}` }], details: {} };
+      return { content: [{ type: "text", text: `Checked out ${tid}\nBackup tag created: ${params.backupTag || "none"}\nmessage: ${enrichedMessage}` }], details: {} };
     },
   });
 

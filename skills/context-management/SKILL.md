@@ -5,82 +5,114 @@ description: Strategies for efficient context management using context_log, cont
 
 # Context Management
 
-**CRITICAL: THIS SKILL MANAGES YOUR MEMORY (CONVERSATION HISTORY), NOT THE USER'S FILES.**
+**CRITICAL: THIS SKILL MANAGES YOUR MEMORY. WITHOUT IT, YOU WILL FORGET.**
 
-Your context window is a limited resource. As the conversation grows, "pollution" (noise, failed attempts, intermediate logs) degrades your reasoning.
+Your context window is limited. As conversations grow, "pollution" (noise, failed attempts) degrades your reasoning.
 
-**CRITICAL: YOU ARE RESPONSIBLE FOR YOUR CONTEXT STRUCTURE.**
-**DO NOT WAIT FOR THE USER TO TELL YOU TO MANAGE CONTEXT.**
+**YOU MUST PROACTIVELY MANAGE YOUR HISTORY.**
+Do not wait for the user to tell you.
 
-You must proactively use these tools to keep your reasoning sharp and your history structured.
+## The Core Philosophy: Build, Perceive, Navigate
 
-**Use this skill to optimize your "Context Economy":**
-1.  **Structure (Save Points)**: Use `context_tag` to bookmark stable states. **Untagged progress is risky.** Always tag before a major step.
-2.  **Monitor (Awareness)**: Use `context_log` to check your "Usage" and "Segment Size". **Don't fly blind.** High usage degrades your reasoning.
-3.  **Compress (Hygiene)**: Use `context_checkout` to squash history. **Finished tasks are noise.** Summarize them to reclaim memory.
+```
+Context Window = RAM (Expensive, volatile, limited)
+Context Graph  = Disk (Cheap, persistent, unlimited)
 
-## The Context Dashboard
-
-Call `context_log` to see your status. It provides a **HUD** (Health Metrics) and a **Graph** (Map).
-
-### 1. The HUD (Health)
-```text
-• Context Usage:    85% (108k/128k)
-• Segment Size:     84 steps since last tag
+→ Move finished tasks from RAM to the Graph.
 ```
 
-### 2. The Graph (Map)
-The log tree shows where you are and where you've been.
-```text
-| 1a2b3c4 (ROOT, tag: start) [USER] Start the project.
-| ... (50 hidden messages) ...
-| f9e8d7c (tag: task-a-done) [SUMMARY] Task A completed.
-| ... (5 hidden messages) ...
-* a1b2c3d (HEAD, tag: task-b-start) [AI] I have switched to Task B.
-```
-- **`*` (Asterisk)**: Your current location (HEAD).
-- **`... (hidden)`**: Low-value steps (thinking/tools) are auto-collapsed.
-- **`tag: name`**: Safe checkpoints to jump back to.
-- **`[SUMMARY]`**: A compressed history node (squashed context).
+Manage your context window like a Git repository. You are the maintainer.
 
-## Decision Framework: When to Act?
+1.  **BUILD the Skeleton (`context_tag`)**:
+    *   Raw conversation is a flat list. **Tags create structure.**
+    *   Without tags, `context_log` is just a list of IDs. With tags, it is a **Map**.
+2.  **PERCEIVE the State (`context_log`)**:
+    *   Check the HUD: Is "Segment Size" too big? You are drifting.
+    *   Check the Graph: Where are you? Are you in a deep branch?
+3.  **NAVIGATE & MERGE (`context_checkout`)**:
+    *   **Squash:** Convert a messy "feature branch" (thinking process) into a single "merge commit" (summary).
+    *   **Jump:** Move between tasks or retry paths without carrying baggage.
 
-### 1. Resource Perspective (The Dashboard)
-*Check the `context_log` HUD.*
+## Quick Start: The Loop
 
-| Signal | Diagnosis | Prescription |
+Follow this cycle for every major task:
+
+1.  **CHECK:** Verify state.
+    `context_log`
+2.  **START:** Tag the beginning.
+    `context_tag({ name: "task-start" })`
+3.  **WORK:** Execute steps.
+4.  **MILESTONE:** Tag intermediate stable states (e.g., "Plan done", "Part 1 done").
+    `context_tag({ name: "task-plan-done" })`
+5.  **SQUASH (Autonomous):** If history becomes noisy or low-density, **Squash with Backup**.
+    *   *Action:* `context_checkout({ target: "task-start", message: "Summarized debugging steps...", backupTag: "pre-squash-backup" })`
+    *   *Action (Optional):* `context_tag({ name: "clean-state" })`
+    *   *Safety:* If you need the details later, you can checkout `pre-squash-backup`.
+
+## Tool Reference
+
+| Tool | Analog | Purpose | When to Use |
+| :--- | :--- | :--- | :--- |
+| `context_tag` | `git tag` | Bookmark a stable state. | Before risky changes. Before starting a new task. |
+| `context_log` | `git log` | See where you are. | When you feel lost. To find IDs for checkout. |
+| `context_checkout`| `git reset --soft` | **Time Travel / Squash.** | To undo mistakes. To compress history. |
+
+## Critical Rules
+
+### Tag Wisely (Build The Skeleton)
+Tags are the "Table of Contents". Use them to mark **Start** and **Backups**.
+*   **Start:** `task-start`
+*   **Backup:** `task-raw-history` (Created automatically by `backupTag`)
+*   **Milestone:** `phase-1-done`
+
+
+### Squash Noise, Keep Signal, Focus on Goal (Context Hygiene)
+Think of your conversation as a "Feature Branch" full of messy thoughts.
+**You must distinguish Signal from Noise.**
+
+*   **Signal (High Value):** Design decisions, user constraints, final working code. -> **KEEP.**
+*   **Noise (Low Value):** Failed attempts, long tool outputs, "thinking" steps. -> **SQUASH.**
+*   **Focus on Goal:** Ask yourself: "Does this message help me achieve the current goal?" -> **KEEP.**
+
+**When to Squash:**
+1.  **Task Done:** Convert the messy process into one clean summary.
+2.  **Low Density:** You read 2000 lines but only found 1 error.
+
+**Safety:** Squashing is **LOSSLESS**.
+By using `backupTag`, you save the "Messy Branch" forever. You can always checkout the backup tag if the summary isn't enough.
+*   **Main Trunk:** Jump back to the summary.
+*   **Backup Tag:** Jump back to the raw details.
+
+### Fail Fast, Revert Faster
+If you fail 3 times:
+1.  **STOP.** Don't try a 4th time.
+2.  `context_checkout` back to the last safe tag.
+3.  Summarize the failure in the checkout message ("Tried X, failed because Y").
+4.  Try a new approach from the clean state.
+
+## Decision Matrix: When to Act
+
+| Situation | Action | Reason |
 | :--- | :--- | :--- |
-| **Usage > 50%** | **ATTENTION DECAY**: Recall fades, instruction adherence drops, and reasoning quality suffers. | **COMPRESS**: `context_checkout({ target: "task-start", message: "Consolidated progress...", tagName: "clean-up" })` |
-| **Segment > 10** | **LINEAR FATIGUE**: Hard to distinguish signal from noise in long threads. | **TAG**: `context_tag({ name: "safe-point" })` |
-| **Reading Huge Files / Web Search** | **LOW INFO DENSITY**: You read 500 lines but only need 5 lines. | **EXTRACT & REWIND**: `context_checkout({ target: "pre-read", message: "File content summary: [Key Configs...]", tagName: "extracted-info" })` |
+| **Starting Task** | `context_tag({ name: "task-X-start" })` | Create a rollback point. |
+| **Research / Logs** | `context_checkout` (Squash) | **Process is Noise.** Read 2000 lines -> Keep result. |
+| **Messy Debugging** | **Squash w/ Backup** | **Cleanup.** The error logs are noise once fixed. |
+| **Task Done (Candidate)**| **Squash w/ Backup** | **Assume Success.** Summary is usually enough. Backup exists if not. |
+| **Goal Shift** | `context_checkout` (Squash) | Old context is irrelevant. |
+| **Drift (some steps w/o tag)** | **Tag (Milestone)** | Maintain the skeleton. Don't fly blind. |
 
-### 2. Task Perspective (The Workflow)
-*Reflect on your current progress.*
+## The "Context Health" Check
 
-| Signal | Diagnosis | Prescription |
-| :--- | :--- | :--- |
-| **"I tried 3 times and failed"** | **POISONED CONTEXT**: Previous failures bias future attempts and eat up token budget. | **BACKTRACK**: `context_checkout({ target: "last-working-tag", message: "Approach A failed..." })` |
-| **"I think I finished the task"** | **PENDING**: User might ask for tweaks. | **TAG ONLY**: `context_tag({ name: "feature-x-candidate" })`. **Do not squash yet.** |
-| **"User starts a NEW task"** | **SAFE TO CLOSE**: Old context is now clutter. | **SQUASH**: `context_checkout({ target: "root", message: "Prev task done. Summary...", tagName: "clean-slate" })` |
+If you cannot answer these, run `context_log`:
 
-## Workflow Best Practices
+| Question | Answer Source |
+| :--- | :--- |
+| **Where is the skeleton?** | The sequence of `tag`s in the log. |
+| **Is this history useful?** | If "No" -> **SQUASH IT.** |
+| **Am I in a loop?** | Repeated entries in the graph. |
 
-### 1. Build the ToC (`context_tag`)
-Don't just work blindly. Tag your milestones so you (and the user) can see the structure.
-- *Good*: `start` -> `plan-v1` -> `impl-v1` -> `test-pass`
-- *Bad*: `start` -> (100 messages) -> `done`
 
-### 2. View the Map (`context_log`)
-Check where you are and how expensive the path is.
-- Use `verbose: false` (default) to see the high-level "ToC" (Milestones).
-
-### 3. Squash & Merge (`context_checkout`)
-**This is your Garbage Collector.** Use it to delete low-value history but keep high-value insights.
-
-> **CRITICAL REMINDER: CONTEXT IS NOT CODEBASE**
-> Checking out a new context branch **DOES NOT DELETE FILES**. It only resets your *conversation memory*. Your code on disk is safe.
-
-**Checkout Messages**
+## Good Checkout Messages
 
 The `message` is your lifeline to your past self.
 A good message preserves critical context that would otherwise be lost.
@@ -99,82 +131,89 @@ Examples:
 *   *Bad*: "Switching context." (Too vague - you will forget why)
 *   *Bad*: "Done." (What is done? What did we learn?)
 
-**Safety Net (Undo Button):**
-`context_checkout` is non-destructive. If you squash too much, use `context_log` to find the old branch ID and checkout back to it.
+## Anti-Patterns
 
-**Checkout Failures**
-If `context_checkout` fails with "Target not found":
-1.  Run `context_log` immediately to see available commit IDs and tags.
-2.  Select a valid ID from the log.
-3.  Retry the checkout.
+| Don't | Do Instead |
+| :--- | :--- |
+| **Blind Tagging** (Tagging without looking) | **Check** (`context_log`) to avoid duplicates or tagging noise. |
+| **Over-Tagging** (Tagging every step) | **Tag** only major phase changes (`start`, `milestone`). |
+| **Hoard** (Keep all history "just in case") | **Squash** low-density history (research, logs). |
+| **Panic** (Apologize repeatedly for errors) | **Revert** (`context_checkout`) to before the error. |
+| **Blind Checkout** (Guessing IDs) | **Look** (`context_log`) first to get valid IDs. |
+| **Vague Summaries** ("Done", "Fixed") | **Detailed Summaries** ("Found bug in line 40. Fixed with patch X.") |
 
-## Scenarios
+## Recipes (Copy-Paste)
 
-**Scenario: Task Complete & Confirmed**
-You finished Feature A. **Wait for user confirmation.**
-*User*: "Looks good. Now let's work on Feature B."
-*Reasoning*: Feature A details are now noise. Feature B needs a clean slate.
-
-```javascript
-// 1. Tag the raw history (just in case)
-context_tag({ name: "feature-a-raw" });
-
-// 2. Squash to Root (or previous milestone)
-context_checkout({
-  target: "root", // or "project-start"
-  message: "Feature A completed. All tests passed. Key files created: X, Y, Z.",
-  tagName: "feature-a-done"
-});
-```
-*Result*: You are now at a clean state with just the summary of Feature A. Cost dropped from 50 msgs to 1 msg.
-
-**Scenario: Pivot / Retry**
-You tried approach A and it failed 5 times (Pollution).
-*Solution*: Backtrack and summarize the failure.
+### 1. The "Miner" (Immediate Squash)
+**Goal:** Pure information gathering (Reading files, Searching web).
+**Why:** The *process* of searching is irrelevant. Only the *result* matters.
 
 ```javascript
-// Return to the state BEFORE the failed attempts
-context_checkout({
-  target: "task-start", 
-  message: "Approach A failed due to library incompatibility. Context clean. Starting Approach B.",
-  tagName: "retry-approach-b"
-});
-```
-
-**Scenario: Data Extraction / Research**
-You read a huge file (e.g., 2000 lines) or searched the web, but only found 3 relevant lines.
-*Problem*: The context is now polluted with 1997 lines of noise.
-*Solution*: Send the 3 lines back to your past self.
-
-```javascript
-// 1. Tag BEFORE you start reading/searching (proactive)
+// 1. Tag BEFORE starting the noisy work
 context_tag({ name: "pre-research" });
 
-// ... (You read the huge file and find the key config) ...
+// ... (Read 5 files, search 3 sites, find 1 key fact) ...
 
-// 2. Checkout back to the tag, bringing ONLY the key info
+// 2. Squash IMMEDIATELY. Do not wait for user.
 context_checkout({
   target: "pre-research",
-  message: "Found the key configuration in line 150: 'MAX_CONNECTIONS=5'. The rest of the file was irrelevant.",
-  tagName: "research-complete"
+  message: "Researched logs. Found root cause: DB timeout. Irrelevant logs discarded.",
+  backupTag: "raw-research-logs" // Safety backup
 });
+context_tag({ name: "research-done" });
 ```
-*Result*: Your context now contains the prompt, the tag, and the single message with the key config. The 2000 lines of noise are gone.
 
-**Scenario: Code Fix / "Time Travel" Debugging**
-You wrote code, it failed, you fixed it after 10 tries.
-*Problem*: Context has 10 failed attempts and error logs.
-*Solution*: Send the *final working code* back to the moment before you started coding.
+### 2. The "Candidate" (Wait for Confirmation)
+**Goal:** You finished a complex task.
+**Why:** The history is noisy. The result is clean.
+**Safety:** We create a backup tag automatically.
 
 ```javascript
-// 1. You realize you are in a messy debug loop.
-// 2. You finally get the code working.
-// 3. Checkout back to BEFORE you started the implementation.
-
+// Squash to Summary (Optimistic Cleanup)
 context_checkout({
-  target: "impl-start", 
-  message: "Implementation successful. Here is the working code: \n```javascript\n...\n```\nSkipped the debugging steps.",
-  tagName: "impl-done"
+  target: "feature-a-start", // Squash range: Start -> Now
+  message: "Feature A implemented. 5 files changed. Tests passed. Revert to 'feature-a-raw-history' for full logs.",
+  backupTag: "feature-a-raw-history"
 });
+context_tag({ name: "feature-a-candidate" });
 ```
-*Result*: It looks like you got it right on the first try. Context is clean and focused.
+
+### 3. The "Undo" (Revert Squash)
+**Goal:** User asks about a detail you squashed away.
+**Action:** Jump back to the backup tag.
+
+```javascript
+// Jump back to the raw history
+context_checkout({
+  target: "feature-a-raw-history",
+  message: "Reverting to raw history to check specific error logs."
+});
+context_tag({ name: "restored-history" });
+```
+
+### 4. Branching (Alternative Approach)
+**Scenario:** Method A failed (and was squashed). You want to try Method B from the clean state.
+**Action:** Checkout the start point.
+
+```javascript
+// Jump back to start
+context_checkout({
+  target: "task-start", 
+  message: "Method A failed (see summary in 'method-a-fail'). Starting Method B from clean state."
+});
+context_tag({ name: "method-b-start" });
+```
+
+### 5. The "Undo" (Failed Attempt)
+You tried to fix a bug but broke everything.
+**Goal:** Clean up a failed path.
+
+```javascript
+// Jump back to safety.
+context_checkout({
+  target: "pre-debug-tag",
+  message: "Attempted fix using Method A failed. Error: 'Timeout'.",
+  backupTag: "failed-attempt-1" // Save the failure just in case
+});
+context_tag({ name: "debug-retry" });
+```
