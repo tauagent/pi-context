@@ -39,15 +39,15 @@ Follow this cycle for every major task:
 
 1.  **CHECK:** Verify state.
     `context_log`
-2.  **START:** Tag the beginning.
-    `context_tag({ name: "task-start" })`
+2.  **START:** Tag the beginning with a semantic name.
+    `context_tag({ name: "<task-slug>-start" })`  // e.g., `auth-login-start`
 3.  **WORK:** Execute steps.
-4.  **MILESTONE:** Tag intermediate stable states (e.g., "Plan done", "Part 1 done").
-    `context_tag({ name: "task-plan-done" })`
+4.  **MILESTONE:** Tag intermediate stable states.
+    `context_tag({ name: "<task-slug>-plan" })`  // e.g., `auth-login-plan`
 5.  **SQUASH (Autonomous):** If history becomes noisy or low-density, **Squash with Backup**.
-    *   *Action:* `context_checkout({ target: "task-start", message: "Summarized debugging steps...", backupTag: "pre-squash-backup" })`
-    *   *Action (Optional):* `context_tag({ name: "clean-state" })`
-    *   *Safety:* If you need the details later, you can checkout `pre-squash-backup`.
+    *   *Action:* `context_checkout({ target: "<task-slug>-start", message: "...", backupTag: "<task-slug>-raw-history" })`
+    *   *Action (Optional):* `context_tag({ name: "<task-slug>-done" })`
+    *   *Safety:* If you need the details later, checkout the backup tag.
 
 ## Tool Reference
 
@@ -60,11 +60,32 @@ Follow this cycle for every major task:
 ## Critical Rules
 
 ### Tag Wisely (Build The Skeleton)
-Tags are the "Table of Contents". Use them to mark **Start** and **Backups**.
-*   **Start:** `task-start`
-*   **Backup:** `task-raw-history` (Created automatically by `backupTag`)
-*   **Milestone:** `phase-1-done`
 
+Tags are the "Table of Contents". Name them so you can understand the history at a glance.
+
+**Naming Formula:** `<task-slug>-<phase>`
+
+*   **task-slug**: Short, kebab-case identifier for the task (e.g., `auth-login`, `db-migration`)
+*   **phase**: The stage of work (`start`, `plan`, `impl`, `done`, `fail`, `backup`)
+
+| Bad (Generic) | Good (Semantic) | Why |
+| :--- | :--- | :--- |
+| `task-start` | `auth-oauth-start` | Describes WHAT task |
+| `pre-research` | `error-log-analysis-start` | Future-you knows the topic |
+| `phase-1-done` | `db-schema-plan-done` | Know which phase of which task |
+| `debug-retry` | `null-pointer-fix-retry` | What bug? |
+
+**Tag Categories:**
+
+| Category | Pattern | Examples |
+| :--- | :--- | :--- |
+| **Start** | `<task>-start` | `auth-jwt-start`, `docker-setup-start` |
+| **Plan** | `<task>-plan` | `api-v2-plan`, `migration-plan` |
+| **Milestone** | `<task>-<milestone>` | `auth-jwt-impl-done`, `tests-passed` |
+| **Backup** | `<task>-raw-history` | `auth-jwt-raw-history` |
+| **Failure** | `<task>-fail-<reason>` | `auth-jwt-fail-timeout` |
+
+**How to generate:** Ask yourself "What is the task?" → Extract 1-3 keywords (e.g., "fix login timeout" → `login-timeout-fix-start`)
 
 ### Squash Noise, Keep Signal, Focus on Goal (Context Hygiene)
 Think of your conversation as a "Feature Branch" full of messy thoughts.
@@ -94,7 +115,7 @@ If you fail 3 times:
 
 | Situation | Action | Reason |
 | :--- | :--- | :--- |
-| **Starting Task** | `context_tag({ name: "task-X-start" })` | Create a rollback point. |
+| **Starting Task** | `context_tag({ name: "<task-slug>-start" })` | Create a rollback point. |
 | **Research / Logs** | `context_checkout` (Squash) | **Process is Noise.** Read 2000 lines -> Keep result. |
 | **Messy Debugging** | **Squash w/ Backup** | **Cleanup.** The error logs are noise once fixed. |
 | **Task Done (Candidate)**| **Squash w/ Backup** | **Assume Success.** Summary is usually enough. Backup exists if not. |
@@ -117,17 +138,16 @@ If you cannot answer these, run `context_log`:
 The `message` is your lifeline to your past self.
 A good message preserves critical context that would otherwise be lost.
 
-Structure: `[Status] + [Reason] + [Carryover Data] + [Important Changes]`
+Structure: `[Key Finding/Status] + [Reason] + [Important Changes]`
 
-*   **Status**: What did you just finish or stop doing?
-*   **Reason**: Why are you branching/moving? (e.g., "Too much noise", "Task complete", "Failed attempt")
-*   **Carryover**: What specific details (e.g., IDs, file paths, user constraints) must be remembered?
+*   **Key Finding/Status**: What did you discover or complete? Include specific numbers, errors, or outcomes.
+*   **Reason**: Why are you branching/moving? (e.g., "Task complete", "Approach failed", "Need raw logs")
 *   **Important Changes**: What files or logic have been modified? (This checkout only resets *conversation history*, NOT disk files, so you must remember what changed.)
 
 Examples:
 
-*   *Good (Resetting after failure)*: "Abandoning the recursive approach (infinite loop). Switching back to iterative. **Important Changes**: Modified `utils/recursion.ts`. **Carryover**: The test case `test_retry_logic` is the one failing."
-*   *Good (Cleaning up)*: "Completed authentication module. All tests passed. **Important Changes**: Created `auth/` directory and updated `routes.ts`. **Carryover**: The user ID is stored in `localStorage` under `auth_token`. Moving to Dashboard UI."
+*   *Good (Resetting after failure)*: "Recursive parser hit stack overflow at depth 8000. Switching to iterative. **Reason**: Stack limit reached. **Important Changes**: Modified `utils/recursion.ts`."
+*   *Good (Cleaning up)*: "Auth module complete: JWT + OAuth2 + RBAC. 23 tests passing. **Reason**: Task done, cleaning context. **Important Changes**: Created `auth/`, modified `routes.ts` and `middleware.ts`."
 *   *Bad*: "Switching context." (Too vague - you will forget why)
 *   *Bad*: "Done." (What is done? What did we learn?)
 
@@ -141,6 +161,7 @@ Examples:
 | **Panic** (Apologize repeatedly for errors) | **Revert** (`context_checkout`) to before the error. |
 | **Blind Checkout** (Guessing IDs) | **Look** (`context_log`) first to get valid IDs. |
 | **Vague Summaries** ("Done", "Fixed") | **Detailed Summaries** ("Found bug in line 40. Fixed with patch X.") |
+| **Generic Tag Names** (`task-start`, `phase-1`) | **Semantic Names** (`auth-jwt-start`, `db-schema-plan`) |
 
 ## Recipes (Copy-Paste)
 
@@ -148,19 +169,21 @@ Examples:
 **Goal:** Pure information gathering (Reading files, Searching web).
 **Why:** The *process* of searching is irrelevant. Only the *result* matters.
 
-```javascript
-// 1. Tag BEFORE starting the noisy work
-context_tag({ name: "pre-research" });
+**Example Task:** Analyzing error logs to find root cause of timeout
 
-// ... (Read 5 files, search 3 sites, find 1 key fact) ...
+```javascript
+// 1. Tag BEFORE starting the noisy work (use descriptive name)
+context_tag({ name: "timeout-analysis-start" });
+
+// ... (Read 5 log files, search 3 docs, find DB connection pool exhaustion) ...
 
 // 2. Squash IMMEDIATELY. Do not wait for user.
 context_checkout({
-  target: "pre-research",
-  message: "Researched logs. Found root cause: DB timeout. Irrelevant logs discarded.",
-  backupTag: "raw-research-logs" // Safety backup
+  target: "timeout-analysis-start",
+  message: "Found DB connection pool exhaustion as root cause (pool size: 10, peak load: 1000 req/s). Recommended fix: increase to 50. **Reason**: Context cleanup after research. **Important Changes**: None (read-only).",
+  backupTag: "timeout-analysis-raw-history" // Safety backup
 });
-context_tag({ name: "research-done" });
+context_tag({ name: "timeout-analysis-done" });
 ```
 
 ### 2. The "Candidate" (Wait for Confirmation)
@@ -168,52 +191,60 @@ context_tag({ name: "research-done" });
 **Why:** The history is noisy. The result is clean.
 **Safety:** We create a backup tag automatically.
 
+**Example Task:** Implementing OAuth login flow
+
 ```javascript
 // Squash to Summary (Optimistic Cleanup)
 context_checkout({
-  target: "feature-a-start", // Squash range: Start -> Now
-  message: "Feature A implemented. 5 files changed. Tests passed. Revert to 'feature-a-raw-history' for full logs.",
-  backupTag: "feature-a-raw-history"
+  target: "oauth-impl-start", // Squash range: Start -> Now
+  message: "OAuth2 flow implemented with PKCE, Google + GitHub providers. All 12 tests passing. **Reason**: Task complete, cleaning up. **Important Changes**: Created `auth/oauth.ts`, modified `routes.ts`, `config.ts`. Backup at 'oauth-impl-raw-history'.",
+  backupTag: "oauth-impl-raw-history"
 });
-context_tag({ name: "feature-a-candidate" });
+context_tag({ name: "oauth-impl-candidate" });
 ```
 
 ### 3. The "Undo" (Revert Squash)
 **Goal:** User asks about a detail you squashed away.
 **Action:** Jump back to the backup tag.
 
+**Example Task:** Reviewing OAuth implementation details
+
 ```javascript
 // Jump back to the raw history
 context_checkout({
-  target: "feature-a-raw-history",
-  message: "Reverting to raw history to check specific error logs."
+  target: "oauth-impl-raw-history",
+  message: "Reviewing token refresh logic - user reports 401 after 15 min idle. Suspect refresh token not firing. **Reason**: Need raw logs to trace the bug. **Important Changes**: None."
 });
-context_tag({ name: "restored-history" });
+context_tag({ name: "oauth-review-start" });
 ```
 
 ### 4. Branching (Alternative Approach)
 **Scenario:** Method A failed (and was squashed). You want to try Method B from the clean state.
 **Action:** Checkout the start point.
 
+**Example Task:** Fixing memory leak - trying different approaches
+
 ```javascript
-// Jump back to start
+// Method A (weak references) failed, trying Method B (object pooling)
 context_checkout({
-  target: "task-start", 
-  message: "Method A failed (see summary in 'method-a-fail'). Starting Method B from clean state."
+  target: "memory-leak-fix-start", 
+  message: "WeakRef approach failed: objects GC'd within 30s (expected: 5min). Cache hit rate dropped from 95% to 12%. **Reason**: Switching to object pooling approach. **Important Changes**: `CacheManager.ts` modified (will revert)."
 });
-context_tag({ name: "method-b-start" });
+context_tag({ name: "memory-leak-pool-approach-start" });
 ```
 
 ### 5. The "Undo" (Failed Attempt)
 You tried to fix a bug but broke everything.
 **Goal:** Clean up a failed path.
 
+**Example Task:** Fixing race condition in async handler
+
 ```javascript
-// Jump back to safety.
+// Attempted mutex-based fix, but introduced deadlock
 context_checkout({
-  target: "pre-debug-tag",
-  message: "Attempted fix using Method A failed. Error: 'Timeout'.",
-  backupTag: "failed-attempt-1" // Save the failure just in case
+  target: "race-condition-fix-start",
+  message: "Mutex caused deadlock: Thread A holds mutex, awaits callback; callback needs mutex held by B; B waits for A. Circular wait detected. **Reason**: Trying lock-free CAS approach next. **Important Changes**: `AsyncQueue.ts` lines 70-90 modified (backup saved).",
+  backupTag: "race-condition-mutex-fail" // Save the failure for reference
 });
-context_tag({ name: "debug-retry" });
+context_tag({ name: "race-condition-lockfree-start" });
 ```
