@@ -290,7 +290,7 @@ export default function (pi: ExtensionAPI) {
       const usage = await ctx.getContextUsage();
       let usageStr = "Unknown";
       if (usage) {
-        usageStr = `${usage.percent.toFixed(1)}% (${formatTokens(usage.tokens)}/${formatTokens(usage.contextWindow)})`;
+        usageStr = `${usage.percent?.toFixed(1) ?? 0}% (${formatTokens(usage.tokens ?? 0)}/${formatTokens(usage.contextWindow ?? 0)})`;
       }
 
       // Find the distance to the nearest tag
@@ -397,7 +397,7 @@ export default function (pi: ExtensionAPI) {
 
       const systemTokensRaw = estimateTokens(systemPrompt);
       const toolDefTokensRaw = estimateTokens(JSON.stringify(activeToolDefs));
-      const totalActual = usage.tokens;
+      const totalActual = usage.tokens ?? 0;
       const limit = usage.contextWindow;
 
       const totalRaw = systemTokensRaw + toolDefTokensRaw + msgTokensRaw + toolUseTokensRaw + toolResultTokensRaw;
@@ -456,7 +456,7 @@ export default function (pi: ExtensionAPI) {
           gridLines.push(rowStr.trimEnd());
         }
 
-        const totalUsageTitle = `${theme.fg("text", theme.bold("Total Usage".padEnd(16)))} ${theme.fg("text", theme.bold(formatTokens(totalActual).padStart(7)))} ${theme.fg("text", theme.bold(`(${usage.percent.toFixed(1).padStart(5)}%)`))}`;
+        const totalUsageTitle = `${theme.fg("text", theme.bold("Total Usage".padEnd(16)))} ${theme.fg("text", theme.bold(formatTokens(totalActual).padStart(7)))} ${theme.fg("text", theme.bold(`(${usage.percent?.toFixed(1) ?? 0}.padStart(5)}%)`))}`;
 
         const catDetailLines = categories.map(cat => {
           const labelStr = cat.label.padEnd(14);
