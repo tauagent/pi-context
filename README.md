@@ -1,4 +1,4 @@
-# Pi Context Extension
+# Pi Context: Agentic Context Management for the Pi
 
 A Git-like context management tool that allows AI agents to proactively manage their context.
 
@@ -17,10 +17,10 @@ pi install npm:pi-context
 
 ### For Humans
 
-Load the skill to enable the workflow:
+Run the command to enable ACM (**A**gentic **C**ontext **M**anagement) for the current session.
 
 ```bash
-/skill:context-management
+/acm
 ```
 
 View detailed context window usage and token distribution with a visual dashboard. (like `claude code /context`)
