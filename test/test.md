@@ -1,5 +1,5 @@
 ```bash
-pi -ne -ns --skill ./skills -e ./src/index.ts -e ./src/context.ts
+pi --no-skills --no-extensions --skill ./skills -e ./src/index.ts -e ./src/context.ts
 ```
 
 ```md

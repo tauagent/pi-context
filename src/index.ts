@@ -64,17 +64,29 @@ export default function (pi: ExtensionAPI) {
         description: "Enable agentic context management for the current session",
         handler: async (args, ctx) => {
             CommandCtx = ctx;
-            pi.setActiveTools(pi.getActiveTools().concat(InternalTools));
             ctx.ui.notify("Agentic Context Management enabled.", "info");
             pi.sendMessage({
                 customType: "pi-context",
-                content: "read context-management skill",
+                content: "use context-management skill",
                 display: false,
             }, {
                 deliverAs: "followUp"
             });
+            if (args) {
+                pi.sendUserMessage(args)
+            }
         }
     });
+
+    // Helper: Check if a tag name already exists in the tree
+    const findTagInTree = (sm: SessionManager, nodes: SessionTreeNode[], tagName: string): string | null => {
+        for (const n of nodes) {
+            if (sm.getLabel(n.entry.id) === tagName) return n.entry.id;
+            const r = findTagInTree(sm, n.children, tagName);
+            if (r) return r;
+        }
+        return null;
+    };
 
     pi.registerTool({
         name: "context_tag",
@@ -83,6 +95,19 @@ export default function (pi: ExtensionAPI) {
         parameters: ContextTagParams,
         async execute(_id, params: Static<typeof ContextTagParams>, _signal, _onUpdate, ctx) {
             const sm = ctx.sessionManager as SessionManager;
+
+            // Deduplication check: ensure tag name is unique
+            const existingTagId = findTagInTree(sm, sm.getTree(), params.name);
+            if (existingTagId) {
+                return {
+                    content: [{
+                        type: "text",
+                        text: `Error: Tag '${params.name}' already exists at ${existingTagId}. Tag names must be unique. Use a different name or delete the existing tag first.`
+                    }],
+                    details: {}
+                };
+            }
+
             let id = params.target ? resolveTargetId(sm, params.target) : undefined;
 
             if (!id) {
@@ -343,7 +368,14 @@ export default function (pi: ExtensionAPI) {
         parameters: ContextCheckoutParams,
         async execute(_id, params: Static<typeof ContextCheckoutParams>, _signal, _onUpdate, ctx) {
             if (!CommandCtx) {
-                return { content: [{ type: "text", text: "Command context not available, require /acm command first." }], details: {} };
+                ctx.ui.setEditorText(`/acm ${ctx.ui.getEditorText() || "continue"}`)
+                return {
+                    content: [{
+                        type: "text",
+                        text: "Agentic context management is not enabled. Ask the user to run `/acm` in the pi to enable it, then retry."
+                    }],
+                    details: {}
+                };
             }
             const sm = ctx.sessionManager as SessionManager;
 
@@ -395,15 +427,10 @@ export default function (pi: ExtensionAPI) {
 
         pi.sendMessage({
             customType: "pi-context",
-            content: "context_checkout done, continue",
+            content: "context_checkout complete. A summary of your previous branch was injected above. Read it to understand your new state. Execute the 'Next Step' from the summary",
             display: false,
         }, {
             triggerTurn: true,
         });
-    });
-
-    pi.on("session_start", () => {
-        // hide tools by default
-        pi.setActiveTools(pi.getActiveTools().filter(n => !InternalTools.includes(n)));
     });
 }

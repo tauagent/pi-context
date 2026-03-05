@@ -111,6 +111,13 @@ If you fail 3 times:
 3.  Summarize the failure in the checkout message ("Tried X, failed because Y").
 4.  Try a new approach from the clean state.
 
+### After Checkout: Execute Next Step
+
+When `context_checkout` completes and injects a summary, you are in a **new context**.
+
+1. **READ** the injected summary carefully
+2. **EXECUTE** the `Next Step` from the summary - this is your new task.
+
 ## Decision Matrix: When to Act
 
 | Situation | Action | Reason |
@@ -132,24 +139,24 @@ If you cannot answer these, run `context_log`:
 | **Is this history useful?** | If "No" -> **SQUASH IT.** |
 | **Am I in a loop?** | Repeated entries in the graph. |
 
-
 ## Good Checkout Messages
 
 The `message` is your lifeline to your past self.
 A good message preserves critical context that would otherwise be lost.
 
-Structure: `[Key Finding/Status] + [Reason] + [Important Changes]`
+Structure: `[Key Finding/Status] + [Reason] + [Important Changes] + [Next Step]`
 
 *   **Key Finding/Status**: What did you discover or complete? Include specific numbers, errors, or outcomes.
 *   **Reason**: Why are you branching/moving? (e.g., "Task complete", "Approach failed", "Need raw logs")
 *   **Important Changes**: What files or logic have been modified? (This checkout only resets *conversation history*, NOT disk files, so you must remember what changed.)
+*   **Next Step**: What should you do immediately after this squash? Be specific. (e.g., "Wait for user feedback", "Implement the recommended fix", "Revert file X and try approach Y")
 
 Examples:
 
-*   *Good (Resetting after failure)*: "Recursive parser hit stack overflow at depth 8000. Switching to iterative. **Reason**: Stack limit reached. **Important Changes**: Modified `utils/recursion.ts`."
-*   *Good (Cleaning up)*: "Auth module complete: JWT + OAuth2 + RBAC. 23 tests passing. **Reason**: Task done, cleaning context. **Important Changes**: Created `auth/`, modified `routes.ts` and `middleware.ts`."
+*   *Good (Resetting after failure)*: "Recursive parser hit stack overflow at depth 8000. Switching to iterative. **Reason**: Stack limit reached. **Important Changes**: Modified `utils/recursion.ts`. **Next Step**: Inform user of the failure and propose iterative approach."
+*   *Good (Cleaning up)*: "Auth module complete: JWT + OAuth2 + RBAC. 23 tests passing. **Reason**: Task done, cleaning context. **Important Changes**: Created `auth/`, modified `routes.ts` and `middleware.ts`. **Next Step**: Report completion to user, ask if they want to review or test."
 *   *Bad*: "Switching context." (Too vague - you will forget why)
-*   *Bad*: "Done." (What is done? What did we learn?)
+*   *Bad*: "Done." (What is done? What should you do next?)
 
 ## Anti-Patterns
 
@@ -162,6 +169,7 @@ Examples:
 | **Blind Checkout** (Guessing IDs) | **Look** (`context_log`) first to get valid IDs. |
 | **Vague Summaries** ("Done", "Fixed") | **Detailed Summaries** ("Found bug in line 40. Fixed with patch X.") |
 | **Generic Tag Names** (`task-start`, `phase-1`) | **Semantic Names** (`auth-jwt-start`, `db-schema-plan`) |
+| **Missing Next Step** in checkout message | **Always specify** what to do after squash (e.g., "Wait for user", "Implement fix X") |
 
 ## Recipes (Copy-Paste)
 
@@ -180,7 +188,7 @@ context_tag({ name: "timeout-analysis-start" });
 // 2. Squash IMMEDIATELY. Do not wait for user.
 context_checkout({
   target: "timeout-analysis-start",
-  message: "Found DB connection pool exhaustion as root cause (pool size: 10, peak load: 1000 req/s). Recommended fix: increase to 50. **Reason**: Context cleanup after research. **Important Changes**: None (read-only).",
+  message: "Found DB connection pool exhaustion as root cause (pool size: 10, peak load: 1000 req/s). Recommended fix: increase to 50. **Reason**: Context cleanup after research. **Important Changes**: None (read-only). **Next Step**: Report findings to user and await approval to implement fix.",
   backupTag: "timeout-analysis-raw-history" // Safety backup
 });
 context_tag({ name: "timeout-analysis-done" });
@@ -197,7 +205,7 @@ context_tag({ name: "timeout-analysis-done" });
 // Squash to Summary (Optimistic Cleanup)
 context_checkout({
   target: "oauth-impl-start", // Squash range: Start -> Now
-  message: "OAuth2 flow implemented with PKCE, Google + GitHub providers. All 12 tests passing. **Reason**: Task complete, cleaning up. **Important Changes**: Created `auth/oauth.ts`, modified `routes.ts`, `config.ts`. Backup at 'oauth-impl-raw-history'.",
+  message: "OAuth2 flow implemented with PKCE, Google + GitHub providers. All 12 tests passing. **Reason**: Task complete, cleaning up. **Important Changes**: Created `auth/oauth.ts`, modified `routes.ts`, `config.ts`. **Next Step**: Report completion to user, summarize what was implemented.",
   backupTag: "oauth-impl-raw-history"
 });
 context_tag({ name: "oauth-impl-candidate" });
@@ -213,7 +221,7 @@ context_tag({ name: "oauth-impl-candidate" });
 // Jump back to the raw history
 context_checkout({
   target: "oauth-impl-raw-history",
-  message: "Reviewing token refresh logic - user reports 401 after 15 min idle. Suspect refresh token not firing. **Reason**: Need raw logs to trace the bug. **Important Changes**: None."
+  message: "Reviewing token refresh logic - user reports 401 after 15 min idle. Suspect refresh token not firing. **Reason**: Need raw logs to trace the bug. **Important Changes**: None. **Next Step**: Re-read token refresh implementation and identify the bug."
 });
 context_tag({ name: "oauth-review-start" });
 ```
@@ -228,7 +236,7 @@ context_tag({ name: "oauth-review-start" });
 // Method A (weak references) failed, trying Method B (object pooling)
 context_checkout({
   target: "memory-leak-fix-start", 
-  message: "WeakRef approach failed: objects GC'd within 30s (expected: 5min). Cache hit rate dropped from 95% to 12%. **Reason**: Switching to object pooling approach. **Important Changes**: `CacheManager.ts` modified (will revert)."
+  message: "WeakRef approach failed: objects GC'd within 30s (expected: 5min). Cache hit rate dropped from 95% to 12%. **Reason**: Switching to object pooling approach. **Important Changes**: `CacheManager.ts` modified (will revert). **Next Step**: Revert `CacheManager.ts` changes and implement object pooling strategy."
 });
 context_tag({ name: "memory-leak-pool-approach-start" });
 ```
@@ -243,7 +251,7 @@ You tried to fix a bug but broke everything.
 // Attempted mutex-based fix, but introduced deadlock
 context_checkout({
   target: "race-condition-fix-start",
-  message: "Mutex caused deadlock: Thread A holds mutex, awaits callback; callback needs mutex held by B; B waits for A. Circular wait detected. **Reason**: Trying lock-free CAS approach next. **Important Changes**: `AsyncQueue.ts` lines 70-90 modified (backup saved).",
+  message: "Mutex caused deadlock: Thread A holds mutex, awaits callback; callback needs mutex held by B; B waits for A. Circular wait detected. **Reason**: Trying lock-free CAS approach next. **Important Changes**: `AsyncQueue.ts` lines 70-90 modified (backup saved). **Next Step**: Revert `AsyncQueue.ts` and implement lock-free compare-and-swap approach.",
   backupTag: "race-condition-mutex-fail" // Save the failure for reference
 });
 context_tag({ name: "race-condition-lockfree-start" });
