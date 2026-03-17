@@ -64,17 +64,22 @@ export default function (pi: ExtensionAPI) {
         description: "Enable agentic context management for the current session",
         handler: async (args, ctx) => {
             CommandCtx = ctx;
-            ctx.ui.notify("Agentic Context Management enabled.", "info");
-            pi.sendMessage({
-                customType: "pi-context",
-                content: "use context-management skill",
-                display: false,
-            }, {
-                deliverAs: "followUp"
-            });
-            if (args) {
-                pi.sendUserMessage(args)
+            if (ctx.hasUI) {
+                // Interactive mode: notify user and send skill hint to agent.
+                ctx.ui.notify("Agentic Context Management enabled.", "info");
+                pi.sendMessage({
+                    customType: "pi-context",
+                    content: "use context-management skill",
+                    display: false,
+                }, {
+                    deliverAs: "followUp"
+                });
+                if (args) {
+                    pi.sendUserMessage(args)
+                }
             }
+            // Headless mode: just capture CommandCtx (for navigateTree).
+            // No messages or UI side effects.
         }
     });
 
@@ -368,7 +373,9 @@ export default function (pi: ExtensionAPI) {
         parameters: ContextCheckoutParams,
         async execute(_id, params: Static<typeof ContextCheckoutParams>, _signal, _onUpdate, ctx) {
             if (!CommandCtx) {
-                ctx.ui.setEditorText(`/acm ${ctx.ui.getEditorText() || "continue"}`)
+                if (ctx.hasUI) {
+                    ctx.ui.setEditorText(`/acm ${ctx.ui.getEditorText() || "continue"}`)
+                }
                 return {
                     content: [{
                         type: "text",
